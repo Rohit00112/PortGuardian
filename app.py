@@ -135,6 +135,20 @@ def system_health():
     """System health dashboard showing CPU, memory, disk, and network metrics."""
     try:
         metrics = get_all_system_metrics()
+
+        # Check if any of the metrics have errors
+        has_errors = False
+        error_messages = []
+
+        for key, value in metrics.items():
+            if isinstance(value, dict) and 'error' in value:
+                has_errors = True
+                error_messages.append(f"{key}: {value['error']}")
+
+        if has_errors:
+            for message in error_messages:
+                flash(message, 'warning')
+
         return render_template('system_health.html', metrics=metrics)
     except Exception as e:
         logger.error(f"Error in system health dashboard: {str(e)}")

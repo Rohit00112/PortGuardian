@@ -1,0 +1,123 @@
+# PortGuardian - Features Scratchpad
+
+This document tracks potential features to implement in the PortGuardian application.
+
+## Monitoring & Visualization Enhancements
+
+- [ ] **Real-time Graphs and Charts**
+  - [ ] Interactive charts showing CPU/memory usage over time
+  - [ ] Network traffic visualizations for each port
+  - [ ] Heat maps showing process resource consumption
+  - [ ] Implementation notes: Consider using Chart.js or D3.js for frontend visualizations
+
+- [ ] **System Health Dashboard**
+  - [ ] Overall system metrics (CPU, RAM, disk usage, network throughput)
+  - [ ] Temperature monitoring for critical components
+  - [ ] System uptime and load averages
+  - [ ] Implementation notes: Use psutil for backend data collection
+
+- [ ] **Notification System**
+  - [ ] Email/SMS alerts when critical processes crash
+  - [ ] Notifications when ports are opened/closed
+  - [ ] Alerts for unusual network activity or resource spikes
+  - [ ] Implementation notes: Consider using Flask-Mail for email notifications
+
+## Security Features
+
+- [ ] **Port Scanning Detection**
+  - [ ] Monitor for port scanning attempts
+  - [ ] Log and alert on suspicious connection patterns
+  - [ ] Implement basic intrusion detection
+  - [ ] Implementation notes: Track connection frequency and patterns
+
+- [ ] **Enhanced Authentication**
+  - [ ] Two-factor authentication
+  - [ ] Role-based access control (admin vs. viewer)
+  - [ ] LDAP/Active Directory integration
+  - [ ] Implementation notes: Flask-Security could be useful here
+
+- [ ] **Audit Logging**
+  - [ ] Comprehensive logging of all actions
+  - [ ] User activity tracking
+  - [ ] Exportable audit reports
+  - [ ] Implementation notes: Consider using a database to store logs
+
+## Process Management
+
+- [ ] **Process Scheduling**
+  - [ ] Schedule process starts/stops
+  - [ ] Implement automatic restarts for critical services
+  - [ ] Create process dependencies
+  - [ ] Implementation notes: Could use APScheduler for Python scheduling
+
+- [ ] **Resource Limiting**
+  - [ ] Set CPU/memory limits for specific processes
+  - [ ] Implement process prioritization
+  - [ ] Auto-kill processes exceeding resource thresholds
+  - [ ] Implementation notes: Will require elevated privileges
+
+- [ ] **Process Grouping**
+  - [ ] Group related processes together
+  - [ ] Manage services as units
+  - [ ] Batch operations on process groups
+  - [ ] Implementation notes: Create a process group model in the database
+
+## User Experience Improvements
+
+- [ ] **Dark Mode**
+  - [ ] Implement a dark theme option
+  - [ ] Allow customizable color schemes
+  - [ ] Save user preferences
+  - [ ] Implementation notes: Use CSS variables for theming
+
+- [ ] **Mobile App**
+  - [ ] Create a companion mobile application
+  - [ ] Push notifications to mobile devices
+  - [ ] Remote process management
+  - [ ] Implementation notes: Consider React Native or Flutter
+
+- [ ] **Customizable Dashboard**
+  - [ ] Allow users to create custom views
+  - [ ] Save favorite processes/ports for quick access
+  - [ ] Implement drag-and-drop dashboard widgets
+  - [ ] Implementation notes: Look into grid layout libraries like GridStack.js
+
+## Advanced Features
+
+- [ ] **API Integration**
+  - [ ] RESTful API for programmatic access
+  - [ ] Webhook support for integration with other tools
+  - [ ] API documentation with Swagger/OpenAPI
+  - [ ] Implementation notes: Flask-RESTful or FastAPI could be good options
+
+- [ ] **Historical Data Analysis**
+  - [ ] Store historical process/port data
+  - [ ] Trend analysis and anomaly detection
+  - [ ] Performance benchmarking
+  - [ ] Implementation notes: Will need a database like PostgreSQL or TimescaleDB
+
+- [ ] **Container/VM Support**
+  - [ ] Monitor Docker containers
+  - [ ] Track virtual machine processes
+  - [ ] Kubernetes pod monitoring
+  - [ ] Implementation notes: Docker SDK for Python
+
+- [ ] **Network Traffic Analysis**
+  - [ ] Packet inspection capabilities
+  - [ ] Bandwidth monitoring by process
+  - [ ] Traffic categorization (HTTP, DNS, etc.)
+  - [ ] Implementation notes: May need libraries like pyshark or scapy
+
+## Priority Implementation Order
+
+1. System Health Dashboard - Quick win with high value
+2. Dark Mode - Relatively simple to implement
+3. Audit Logging - Important for security
+4. Real-time Graphs and Charts - Enhances user experience
+5. API Integration - Enables further integrations
+
+## Implementation Notes
+
+- All features should maintain the current permission-aware design
+- Consider database migration to PostgreSQL for more advanced features
+- Maintain responsive design for all new UI elements

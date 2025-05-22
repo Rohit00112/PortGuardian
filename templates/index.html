@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .table-hover tbody tr:hover {
+        background-color: rgba(0, 123, 255, 0.1);
+    }
+    .process-link {
+        text-decoration: none;
+    }
+    .process-link:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card shadow">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <h4 class="mb-0"><i class="fas fa-network-wired me-2"></i>Open Ports & Processes</h4>
+        <div>
+            <button id="refreshBtn" class="btn btn-light btn-sm">
+                <i class="fas fa-sync-alt me-1"></i>Refresh
+            </button>
+            <a href="{{ url_for('export_data') }}" target="_blank" class="btn btn-light btn-sm ms-2">
+                <i class="fas fa-file-export me-1"></i>Export
+            </a>
+        </div>
+    </div>
+    <div class="card-body">
+        {% if permission_error or not ports %}
+        <div class="alert alert-warning">
+            <h4 class="alert-heading"><i class="fas fa-exclamation-triangle me-2"></i>Permission Required</h4>
+            <p>This application requires elevated privileges to access process and network information on macOS.</p>
+            <hr>
+            <p class="mb-0">To run with elevated privileges, try:</p>
+            <pre class="bg-light p-3 mt-2"><code>sudo python3 app.py</code></pre>
+            <p class="mt-3">Alternatively, you can use the following system commands to view port information:</p>
+            <pre class="bg-light p-3"><code>lsof -i -P | grep LISTEN    # Show listening ports
+netstat -an | grep LISTEN    # Alternative way to show listening ports</code></pre>
+        </div>
+        {% endif %}
+
+        <div class="table-responsive">
+            <table class="table table-hover table-striped" id="portsTable">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Port</th>
+                        <th>Protocol</th>
+                        <th>Status</th>
+                        <th>PID</th>
+                        <th>Process</th>
+                        <th>Start Time</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for port in ports %}
+                    <tr>
+                        <td>{{ port.port }}</td>
+                        <td>
+                            <span class="badge {% if port.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
+                                {{ port.protocol }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="badge {% if port.status == 'LISTENING' %}bg-success{% else %}bg-warning{% endif %}">
+                                {{ port.status }}
+                            </span>
+                        </td>
+                        <td>{{ port.pid }}</td>
+                        <td>
+                            {% if port.pid != 'N/A' %}
+                            <a href="{{ url_for('process_detail', pid=port.pid) }}" class="process-link">
+                                {{ port.process_name }}
+                            </a>
+                            {% else %}
+                            {{ port.process_name }}
+                            {% endif %}
+                        </td>
+                        <td>{{ port.start_time }}</td>
+                        <td>
+                            {% if port.pid != 'N/A' %}
+                            <div class="btn-group" role="group">
+                                <a href="{{ url_for('process_detail', pid=port.pid) }}" class="btn btn-sm btn-info">
+                                    <i class="fas fa-info-circle"></i>
+                                </a>
+                                <button class="btn btn-sm btn-danger kill-process" data-pid="{{ port.pid }}" data-process="{{ port.process_name }}">
+                                    <i class="fas fa-times-circle"></i>
+                                </button>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Kill Process Confirmation Modal -->
+<div class="modal fade" id="killProcessModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirm Process Termination</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to terminate the following process?</p>
+                <div class="alert alert-warning">
+                    <strong>Process:</strong> <span id="processName"></span><br>
+                    <strong>PID:</strong> <span id="processPid"></span>
+                </div>
+                <p class="text-danger"><strong>Warning:</strong> Terminating system processes may cause instability!</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="killProcessForm" method="post">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="fas fa-times-circle me-1"></i>Terminate Process
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Handle kill process button click
+        $('.kill-process').click(function() {
+            const pid = $(this).data('pid');
+            const processName = $(this).data('process');
+
+            $('#processPid').text(pid);
+            $('#processName').text(processName);
+            $('#killProcessForm').attr('action', '/kill/' + pid);
+
+            const modal = new bootstrap.Modal(document.getElementById('killProcessModal'));
+            modal.show();
+        });
+
+        // Handle refresh button click
+        $('#refreshBtn').click(function() {
+            location.reload();
+        });
+
+        // Auto-refresh every 30 seconds
+        setTimeout(function() {
+            location.reload();
+        }, 30000);
+    });
+</script>
+{% endblock %}

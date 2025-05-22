@@ -47,15 +47,26 @@ def get_cpu_info():
             'cpu_stats': dict(psutil.cpu_stats()._asdict()) if hasattr(psutil, 'cpu_stats') else {},
             'cpu_times_percent': dict(psutil.cpu_times_percent()._asdict())
         }
-        
+
         # Add overall CPU usage
         cpu_info['overall_percent'] = sum(cpu_info['cpu_percent']) / len(cpu_info['cpu_percent'])
-        
+
         return cpu_info
     except Exception as e:
         logger.error(f"Error getting CPU info: {str(e)}")
         return {
-            'error': f"Failed to retrieve CPU information: {str(e)}"
+            'error': f"Failed to retrieve CPU information: {str(e)}",
+            'physical_cores': 0,
+            'total_cores': 0,
+            'cpu_percent': [0],
+            'overall_percent': 0,
+            'cpu_freq': {
+                'current': None,
+                'min': None,
+                'max': None
+            },
+            'cpu_stats': {},
+            'cpu_times_percent': {}
         }
 
 def get_memory_info():
@@ -64,7 +75,7 @@ def get_memory_info():
         # Virtual memory
         virtual_memory = psutil.virtual_memory()
         swap_memory = psutil.swap_memory()
-        
+
         memory_info = {
             'virtual': {
                 'total': virtual_memory.total,
@@ -85,7 +96,7 @@ def get_memory_info():
                 'free_gb': round(swap_memory.free / (1024**3), 2)
             }
         }
-        
+
         return memory_info
     except Exception as e:
         logger.error(f"Error getting memory info: {str(e)}")
@@ -100,7 +111,7 @@ def get_disk_info():
             'partitions': [],
             'io_counters': {}
         }
-        
+
         # Get disk partitions
         for partition in psutil.disk_partitions():
             try:
@@ -122,7 +133,7 @@ def get_disk_info():
                 # Skip partitions that can't be accessed
                 logger.warning(f"Could not access partition {partition.mountpoint}: {str(e)}")
                 continue
-        
+
         # Get disk I/O counters
         try:
             io_counters = psutil.disk_io_counters(perdisk=True)
@@ -130,7 +141,7 @@ def get_disk_info():
                 disk_info['io_counters'][disk] = dict(counters._asdict())
         except Exception as e:
             logger.warning(f"Could not get disk I/O counters: {str(e)}")
-        
+
         return disk_info
     except Exception as e:
         logger.error(f"Error getting disk info: {str(e)}")
@@ -145,11 +156,11 @@ def get_network_info():
             'interfaces': {},
             'connections': []
         }
-        
+
         # Get network interfaces
         net_if_addrs = psutil.net_if_addrs()
         net_if_stats = psutil.net_if_stats()
-        
+
         for interface, addrs in net_if_addrs.items():
             addresses = []
             for addr in addrs:
@@ -159,7 +170,7 @@ def get_network_info():
                     'netmask': addr.netmask,
                     'broadcast': addr.broadcast
                 })
-            
+
             # Add interface stats if available
             if interface in net_if_stats:
                 stats = net_if_stats[interface]
@@ -176,13 +187,13 @@ def get_network_info():
                 network_info['interfaces'][interface] = {
                     'addresses': addresses
                 }
-        
+
         # Get network I/O counters
         net_io_counters = psutil.net_io_counters(pernic=True)
         for interface, counters in net_io_counters.items():
             if interface in network_info['interfaces']:
                 network_info['interfaces'][interface]['io_counters'] = dict(counters._asdict())
-        
+
         # Get network connections (limited due to permissions)
         try:
             connections = psutil.net_connections(kind='inet')
@@ -199,7 +210,7 @@ def get_network_info():
         except (psutil.AccessDenied, PermissionError) as e:
             logger.warning(f"Could not get network connections due to permissions: {str(e)}")
             network_info['connections_error'] = "Permission denied to access network connections"
-        
+
         return network_info
     except Exception as e:
         logger.error(f"Error getting network info: {str(e)}")
@@ -213,12 +224,12 @@ def get_system_uptime():
         # Get boot time
         boot_time = datetime.datetime.fromtimestamp(psutil.boot_time())
         uptime = datetime.datetime.now() - boot_time
-        
+
         # Format uptime
         days, remainder = divmod(uptime.total_seconds(), 86400)
         hours, remainder = divmod(remainder, 3600)
         minutes, seconds = divmod(remainder, 60)
-        
+
         uptime_info = {
             'boot_time': boot_time.strftime('%Y-%m-%d %H:%M:%S'),
             'uptime_seconds': uptime.total_seconds(),
@@ -228,7 +239,7 @@ def get_system_uptime():
             'minutes': int(minutes),
             'seconds': int(seconds)
         }
-        
+
         return uptime_info
     except Exception as e:
         logger.error(f"Error getting system uptime: {str(e)}")

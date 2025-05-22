@@ -106,7 +106,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="col-md-6">
         <div class="card shadow metric-card">
             <div class="card-header bg-success text-white">
@@ -120,15 +120,15 @@
                     <strong>Boot Time:</strong> {{ metrics.uptime_info.boot_time }}
                 </div>
                 <div class="system-info-item">
-                    <strong>Load Average (1, 5, 15 min):</strong> 
-                    {{ "%.2f"|format(metrics.load_info.load_1_min) }}, 
-                    {{ "%.2f"|format(metrics.load_info.load_5_min) }}, 
+                    <strong>Load Average (1, 5, 15 min):</strong>
+                    {{ "%.2f"|format(metrics.load_info.load_1_min) }},
+                    {{ "%.2f"|format(metrics.load_info.load_5_min) }},
                     {{ "%.2f"|format(metrics.load_info.load_15_min) }}
                 </div>
                 <div class="system-info-item">
-                    <strong>Normalized Load (1, 5, 15 min):</strong> 
-                    {{ "%.2f"|format(metrics.load_info.normalized_load_1) }}, 
-                    {{ "%.2f"|format(metrics.load_info.normalized_load_5) }}, 
+                    <strong>Normalized Load (1, 5, 15 min):</strong>
+                    {{ "%.2f"|format(metrics.load_info.normalized_load_1) }},
+                    {{ "%.2f"|format(metrics.load_info.normalized_load_5) }},
                     {{ "%.2f"|format(metrics.load_info.normalized_load_15) }}
                 </div>
             </div>
@@ -145,13 +145,19 @@
             </div>
             <div class="card-body">
                 <h6>Overall CPU Usage</h6>
+                {% if metrics.cpu_info.error is defined %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>{{ metrics.cpu_info.error }}
+                </div>
+                {% else %}
                 <div class="progress mb-4">
-                    <div class="progress-bar bg-danger" role="progressbar" 
+                    <div class="progress-bar bg-danger" role="progressbar"
                          style="width: {{ metrics.cpu_info.overall_percent }}%">
                         {{ "%.1f"|format(metrics.cpu_info.overall_percent) }}%
                     </div>
                 </div>
-                
+                {% endif %}
+
                 <h6>CPU Details</h6>
                 <div class="row mb-3">
                     <div class="col-md-6">
@@ -164,7 +170,7 @@
                     </div>
                     <div class="col-md-6">
                         <div class="system-info-item">
-                            <strong>Current Frequency:</strong> 
+                            <strong>Current Frequency:</strong>
                             {% if metrics.cpu_info.cpu_freq.current %}
                                 {{ "%.2f"|format(metrics.cpu_info.cpu_freq.current) }} MHz
                             {% else %}
@@ -173,7 +179,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <h6>Per-Core Usage</h6>
                 <div class="row">
                     {% for cpu_percent in metrics.cpu_info.cpu_percent %}
@@ -183,7 +189,7 @@
                             <span>{{ "%.1f"|format(cpu_percent) }}%</span>
                         </div>
                         <div class="progress" style="height: 15px;">
-                            <div class="progress-bar bg-danger" role="progressbar" 
+                            <div class="progress-bar bg-danger" role="progressbar"
                                  style="width: {{ cpu_percent }}%"></div>
                         </div>
                     </div>
@@ -192,7 +198,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="col-md-6">
         <div class="card shadow metric-card">
             <div class="card-header bg-warning text-white">
@@ -201,7 +207,7 @@
             <div class="card-body">
                 <h6>RAM Usage</h6>
                 <div class="progress mb-2">
-                    <div class="progress-bar bg-warning text-dark" role="progressbar" 
+                    <div class="progress-bar bg-warning text-dark" role="progressbar"
                          style="width: {{ metrics.memory_info.virtual.percent }}%">
                         {{ metrics.memory_info.virtual.percent }}%
                     </div>
@@ -220,10 +226,10 @@
                         <div class="fw-bold">{{ metrics.memory_info.virtual.available_gb }} GB</div>
                     </div>
                 </div>
-                
+
                 <h6>Swap Usage</h6>
                 <div class="progress mb-2">
-                    <div class="progress-bar bg-info" role="progressbar" 
+                    <div class="progress-bar bg-info" role="progressbar"
                          style="width: {{ metrics.memory_info.swap.percent }}%">
                         {{ metrics.memory_info.swap.percent }}%
                     </div>
@@ -271,7 +277,7 @@
                                     <span>{{ partition.used_gb }} GB / {{ partition.total_gb }} GB</span>
                                 </div>
                                 <div class="progress disk-usage-bar">
-                                    <div class="progress-bar bg-{{ 'danger' if partition.percent > 90 else 'warning' if partition.percent > 70 else 'success' }}" 
+                                    <div class="progress-bar bg-{{ 'danger' if partition.percent > 90 else 'warning' if partition.percent > 70 else 'success' }}"
                                          role="progressbar" style="width: {{ partition.percent }}%">
                                         {{ partition.percent }}%
                                     </div>
@@ -328,7 +334,7 @@
                                     {% endfor %}
                                 </ul>
                                 {% endif %}
-                                
+
                                 {% if interface.stats %}
                                 <div class="system-info-item">
                                     <strong>Speed:</strong> {{ interface.stats.speed }} Mbps
@@ -337,7 +343,7 @@
                                     <strong>MTU:</strong> {{ interface.stats.mtu }}
                                 </div>
                                 {% endif %}
-                                
+
                                 {% if interface.io_counters %}
                                 <div class="row mt-2">
                                     <div class="col-6 text-center">
@@ -373,7 +379,7 @@
         $('#refreshBtn, #floatingRefreshBtn').click(function() {
             location.reload();
         });
-        
+
         // Auto-refresh every 60 seconds
         setTimeout(function() {
             location.reload();

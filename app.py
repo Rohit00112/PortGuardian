@@ -8,6 +8,7 @@ from datetime import datetime
 
 from utils.port_scanner import get_open_ports
 from utils.process_manager import get_process_info, kill_process
+from utils.system_monitor import get_all_system_metrics
 
 # Configure logging
 logging.basicConfig(
@@ -127,6 +128,29 @@ def api_process(pid):
     if not process_info:
         return jsonify({'error': 'Process not found'}), 404
     return jsonify(process_info)
+
+@app.route('/system-health')
+@login_required
+def system_health():
+    """System health dashboard showing CPU, memory, disk, and network metrics."""
+    try:
+        metrics = get_all_system_metrics()
+        return render_template('system_health.html', metrics=metrics)
+    except Exception as e:
+        logger.error(f"Error in system health dashboard: {str(e)}")
+        flash(f"Error retrieving system metrics: {str(e)}", 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/api/system-health')
+@login_required
+def api_system_health():
+    """API endpoint to get system health metrics as JSON."""
+    try:
+        metrics = get_all_system_metrics()
+        return jsonify(metrics)
+    except Exception as e:
+        logger.error(f"Error in system health API: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/export')
 @login_required

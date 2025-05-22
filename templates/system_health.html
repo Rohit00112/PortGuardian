@@ -1,0 +1,383 @@
+{% extends 'base.html' %}
+
+{% block title %}System Health - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metric-card {
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+    }
+    .metric-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    .progress {
+        height: 25px;
+        margin-bottom: 15px;
+    }
+    .progress-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+    }
+    .system-info-item {
+        padding: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .system-info-item:last-child {
+        border-bottom: none;
+    }
+    .refresh-btn {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        z-index: 1000;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    }
+    .disk-usage-bar {
+        height: 30px;
+        border-radius: 4px;
+        margin-bottom: 10px;
+    }
+    .network-card {
+        border-left: 4px solid #007bff;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">System Health</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-server me-2"></i>System Health Dashboard</h4>
+                <div>
+                    <span id="lastUpdated" class="badge bg-light text-dark me-2">
+                        Last updated: {{ metrics.timestamp }}
+                    </span>
+                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Overview -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i>System Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="system-info-item">
+                    <strong>Operating System:</strong> {{ metrics.system_info.system }} {{ metrics.system_info.release }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Hostname:</strong> {{ metrics.system_info.node }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Machine Type:</strong> {{ metrics.system_info.machine }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Processor:</strong> {{ metrics.system_info.processor }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Python Version:</strong> {{ metrics.system_info.python_version }}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-clock me-2"></i>Uptime & Load</h5>
+            </div>
+            <div class="card-body">
+                <div class="system-info-item">
+                    <strong>System Uptime:</strong> {{ metrics.uptime_info.uptime_formatted }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Boot Time:</strong> {{ metrics.uptime_info.boot_time }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Load Average (1, 5, 15 min):</strong> 
+                    {{ "%.2f"|format(metrics.load_info.load_1_min) }}, 
+                    {{ "%.2f"|format(metrics.load_info.load_5_min) }}, 
+                    {{ "%.2f"|format(metrics.load_info.load_15_min) }}
+                </div>
+                <div class="system-info-item">
+                    <strong>Normalized Load (1, 5, 15 min):</strong> 
+                    {{ "%.2f"|format(metrics.load_info.normalized_load_1) }}, 
+                    {{ "%.2f"|format(metrics.load_info.normalized_load_5) }}, 
+                    {{ "%.2f"|format(metrics.load_info.normalized_load_15) }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CPU & Memory -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>CPU Usage</h5>
+            </div>
+            <div class="card-body">
+                <h6>Overall CPU Usage</h6>
+                <div class="progress mb-4">
+                    <div class="progress-bar bg-danger" role="progressbar" 
+                         style="width: {{ metrics.cpu_info.overall_percent }}%">
+                        {{ "%.1f"|format(metrics.cpu_info.overall_percent) }}%
+                    </div>
+                </div>
+                
+                <h6>CPU Details</h6>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="system-info-item">
+                            <strong>Physical Cores:</strong> {{ metrics.cpu_info.physical_cores }}
+                        </div>
+                        <div class="system-info-item">
+                            <strong>Logical Cores:</strong> {{ metrics.cpu_info.total_cores }}
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="system-info-item">
+                            <strong>Current Frequency:</strong> 
+                            {% if metrics.cpu_info.cpu_freq.current %}
+                                {{ "%.2f"|format(metrics.cpu_info.cpu_freq.current) }} MHz
+                            {% else %}
+                                N/A
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <h6>Per-Core Usage</h6>
+                <div class="row">
+                    {% for cpu_percent in metrics.cpu_info.cpu_percent %}
+                    <div class="col-md-6 mb-2">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>Core {{ loop.index0 }}</span>
+                            <span>{{ "%.1f"|format(cpu_percent) }}%</span>
+                        </div>
+                        <div class="progress" style="height: 15px;">
+                            <div class="progress-bar bg-danger" role="progressbar" 
+                                 style="width: {{ cpu_percent }}%"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0"><i class="fas fa-memory me-2"></i>Memory Usage</h5>
+            </div>
+            <div class="card-body">
+                <h6>RAM Usage</h6>
+                <div class="progress mb-2">
+                    <div class="progress-bar bg-warning text-dark" role="progressbar" 
+                         style="width: {{ metrics.memory_info.virtual.percent }}%">
+                        {{ metrics.memory_info.virtual.percent }}%
+                    </div>
+                </div>
+                <div class="row mb-4">
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Total</div>
+                        <div class="fw-bold">{{ metrics.memory_info.virtual.total_gb }} GB</div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Used</div>
+                        <div class="fw-bold">{{ metrics.memory_info.virtual.used_gb }} GB</div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Available</div>
+                        <div class="fw-bold">{{ metrics.memory_info.virtual.available_gb }} GB</div>
+                    </div>
+                </div>
+                
+                <h6>Swap Usage</h6>
+                <div class="progress mb-2">
+                    <div class="progress-bar bg-info" role="progressbar" 
+                         style="width: {{ metrics.memory_info.swap.percent }}%">
+                        {{ metrics.memory_info.swap.percent }}%
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Total</div>
+                        <div class="fw-bold">{{ metrics.memory_info.swap.total_gb }} GB</div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Used</div>
+                        <div class="fw-bold">{{ metrics.memory_info.swap.used_gb }} GB</div>
+                    </div>
+                    <div class="col-md-4 text-center">
+                        <div class="small text-muted">Free</div>
+                        <div class="fw-bold">{{ metrics.memory_info.swap.free_gb }} GB</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Disk Usage -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="fas fa-hdd me-2"></i>Disk Usage</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for partition in metrics.disk_info.partitions %}
+                    <div class="col-md-6 mb-4">
+                        <div class="card">
+                            <div class="card-header bg-light">
+                                <div class="d-flex justify-content-between">
+                                    <span><strong>{{ partition.mountpoint }}</strong></span>
+                                    <span class="badge bg-secondary">{{ partition.fstype }}</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span>Usage: {{ partition.percent }}%</span>
+                                    <span>{{ partition.used_gb }} GB / {{ partition.total_gb }} GB</span>
+                                </div>
+                                <div class="progress disk-usage-bar">
+                                    <div class="progress-bar bg-{{ 'danger' if partition.percent > 90 else 'warning' if partition.percent > 70 else 'success' }}" 
+                                         role="progressbar" style="width: {{ partition.percent }}%">
+                                        {{ partition.percent }}%
+                                    </div>
+                                </div>
+                                <div class="small text-muted">
+                                    <strong>Device:</strong> {{ partition.device }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Interfaces -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-network-wired me-2"></i>Network Interfaces</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for interface_name, interface in metrics.network_info.interfaces.items() %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card network-card">
+                            <div class="card-header bg-light">
+                                <div class="d-flex justify-content-between">
+                                    <span><strong>{{ interface_name }}</strong></span>
+                                    {% if interface.stats and interface.stats.isup %}
+                                    <span class="badge bg-success">UP</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">DOWN</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if interface.addresses %}
+                                <h6>Addresses</h6>
+                                <ul class="list-group mb-3">
+                                    {% for addr in interface.addresses %}
+                                    <li class="list-group-item">
+                                        <div><strong>{{ addr.address }}</strong></div>
+                                        {% if addr.netmask %}
+                                        <div class="small text-muted">Netmask: {{ addr.netmask }}</div>
+                                        {% endif %}
+                                        {% if addr.broadcast %}
+                                        <div class="small text-muted">Broadcast: {{ addr.broadcast }}</div>
+                                        {% endif %}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                                
+                                {% if interface.stats %}
+                                <div class="system-info-item">
+                                    <strong>Speed:</strong> {{ interface.stats.speed }} Mbps
+                                </div>
+                                <div class="system-info-item">
+                                    <strong>MTU:</strong> {{ interface.stats.mtu }}
+                                </div>
+                                {% endif %}
+                                
+                                {% if interface.io_counters %}
+                                <div class="row mt-2">
+                                    <div class="col-6 text-center">
+                                        <div class="small text-muted">Bytes Sent</div>
+                                        <div class="fw-bold">{{ (interface.io_counters.bytes_sent / 1024 / 1024) | round(2) }} MB</div>
+                                    </div>
+                                    <div class="col-6 text-center">
+                                        <div class="small text-muted">Bytes Received</div>
+                                        <div class="fw-bold">{{ (interface.io_counters.bytes_recv / 1024 / 1024) | round(2) }} MB</div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Floating refresh button -->
+<button id="floatingRefreshBtn" class="btn btn-primary refresh-btn">
+    <i class="fas fa-sync-alt"></i>
+</button>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Handle refresh button click
+        $('#refreshBtn, #floatingRefreshBtn').click(function() {
+            location.reload();
+        });
+        
+        // Auto-refresh every 60 seconds
+        setTimeout(function() {
+            location.reload();
+        }, 60000);
+    });
+</script>
+{% endblock %}

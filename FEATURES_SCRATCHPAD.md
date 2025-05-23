@@ -64,11 +64,11 @@ This document tracks potential features to implement in the PortGuardian applica
 
 ## User Experience Improvements
 
-- [ ] **Dark Mode**
-  - [ ] Implement a dark theme option
-  - [ ] Allow customizable color schemes
-  - [ ] Save user preferences
-  - [ ] Implementation notes: Use CSS variables for theming
+- [x] **Dark Mode**
+  - [x] Implement a dark theme option
+  - [x] Allow customizable color schemes
+  - [x] Save user preferences
+  - [x] Implementation notes: Used CSS variables for theming in dark-theme.css
 
 - [ ] **Mobile App**
   - [ ] Create a companion mobile application

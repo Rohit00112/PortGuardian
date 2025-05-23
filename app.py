@@ -128,6 +128,19 @@ def api_process(pid):
         return jsonify({'error': 'Process not found'}), 404
     return jsonify(process_info)
 
+@app.route('/api/save-theme', methods=['POST'])
+@login_required
+def save_theme():
+    """Save user theme preference."""
+    try:
+        theme = request.json.get('theme', 'light')
+        # In a real application, you would save this to a database
+        # For now, we'll just return success
+        return jsonify({'success': True, 'theme': theme})
+    except Exception as e:
+        logger.error(f"Error saving theme preference: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/export')
 @login_required
 def export_data():

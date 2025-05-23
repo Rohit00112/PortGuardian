@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dark-theme.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -52,6 +53,11 @@
                         </a>
                     </li>
                     {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link theme-toggle" id="themeToggle" href="javascript:void(0);">
+                            <i id="themeIcon" class="fas fa-moon me-1"></i> Theme
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -88,6 +94,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/theme-switcher.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

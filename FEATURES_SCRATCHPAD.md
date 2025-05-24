@@ -36,11 +36,11 @@ This document tracks potential features to implement in the PortGuardian applica
   - [ ] LDAP/Active Directory integration
   - [ ] Implementation notes: Flask-Security could be useful here
 
-- [ ] **Audit Logging**
-  - [ ] Comprehensive logging of all actions
-  - [ ] User activity tracking
-  - [ ] Exportable audit reports
-  - [ ] Implementation notes: Consider using a database to store logs
+- [x] **Audit Logging**
+  - [x] Comprehensive logging of all actions
+  - [x] User activity tracking
+  - [x] Exportable audit reports
+  - [x] Implementation notes: Used SQLite database to store logs with audit_logger.py
 
 ## Process Management
 

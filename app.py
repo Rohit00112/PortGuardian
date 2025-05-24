@@ -8,6 +8,8 @@ from datetime import datetime
 
 from utils.port_scanner import get_open_ports
 from utils.process_manager import get_process_info, kill_process
+from utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+from utils.audit_decorators import audit_action, audit_login_attempt, audit_logout, audit_process_kill
 
 # Configure logging
 logging.basicConfig(
@@ -48,6 +50,7 @@ def load_user(user_id):
 # Routes
 @app.route('/')
 @login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="dashboard", action="view_dashboard")
 def index():
     """Home dashboard showing all open ports and processes."""
     try:
@@ -62,6 +65,7 @@ def index():
 
 @app.route('/process/<int:pid>')
 @login_required
+@audit_action(AuditEventType.PROCESS_VIEW, AuditSeverity.LOW, resource="process", action="view_process_details")
 def process_detail(pid):
     """Detailed view of a specific process."""
     process_info = get_process_info(pid)
@@ -74,7 +78,19 @@ def process_detail(pid):
 @login_required
 def kill_process_route(pid):
     """Kill a process by PID."""
+    # Get process name before killing for audit log
+    process_info = get_process_info(pid)
+    process_name = process_info.get('name', 'Unknown') if process_info else 'Unknown'
+
     result = kill_process(pid, user_id=current_user.username)
+
+    # Audit the process kill attempt
+    audit_process_kill(
+        pid=pid,
+        process_name=process_name,
+        success=result['success'],
+        error_message=result['message'] if not result['success'] else None
+    )
 
     if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return jsonify(result)
@@ -99,7 +115,14 @@ def login():
         if user and check_password_hash(user.password_hash, password):
             login_user(user)
             logger.info(f"User {username} logged in")
+
+            # Audit successful login
+            audit_login_attempt(success=True, username=username)
+
             return redirect(url_for('index'))
+
+        # Audit failed login attempt
+        audit_login_attempt(success=False, username=username, error_message="Invalid credentials")
 
         flash('Invalid username or password', 'danger')
 
@@ -109,6 +132,11 @@ def login():
 @login_required
 def logout():
     """User logout."""
+    username = current_user.username
+
+    # Audit logout
+    audit_logout(username)
+
     logout_user()
     return redirect(url_for('login'))
 
@@ -128,8 +156,156 @@ def api_process(pid):
         return jsonify({'error': 'Process not found'}), 404
     return jsonify(process_info)
 
+@app.route('/api/save-theme', methods=['POST'])
+@login_required
+def save_theme():
+    """Save user theme preference."""
+    try:
+        theme = request.json.get('theme', 'light')
+        # In a real application, you would save this to a database
+        # For now, we'll just return success
+        return jsonify({'success': True, 'theme': theme})
+    except Exception as e:
+        logger.error(f"Error saving theme preference: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/audit-logs')
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="audit", action="view_audit_logs")
+def audit_logs():
+    """View audit logs."""
+    try:
+        # Get filter parameters
+        event_type = request.args.get('event_type')
+        severity = request.args.get('severity')
+        user_id = request.args.get('user_id')
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 50))
+
+        # Convert string parameters to enum values
+        event_type_enum = None
+        if event_type:
+            try:
+                event_type_enum = AuditEventType(event_type)
+            except ValueError:
+                pass
+
+        severity_enum = None
+        if severity:
+            try:
+                severity_enum = AuditSeverity(severity)
+            except ValueError:
+                pass
+
+        # Get logs with pagination
+        offset = (page - 1) * per_page
+        logs = audit_logger.get_logs(
+            limit=per_page,
+            offset=offset,
+            event_type=event_type_enum,
+            severity=severity_enum,
+            user_id=user_id
+        )
+
+        # Get statistics
+        stats = audit_logger.get_log_statistics()
+
+        return render_template('audit_logs.html',
+                             logs=logs,
+                             stats=stats,
+                             page=page,
+                             per_page=per_page,
+                             event_types=[e.value for e in AuditEventType],
+                             severities=[s.value for s in AuditSeverity])
+
+    except Exception as e:
+        logger.error(f"Error in audit logs route: {str(e)}")
+        flash(f"Error retrieving audit logs: {str(e)}", 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/api/audit-logs')
+@login_required
+@audit_action(AuditEventType.API_ACCESS, AuditSeverity.MEDIUM, resource="audit_api", action="get_audit_logs")
+def api_audit_logs():
+    """API endpoint to get audit logs as JSON."""
+    try:
+        # Get filter parameters
+        event_type = request.args.get('event_type')
+        severity = request.args.get('severity')
+        user_id = request.args.get('user_id')
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+
+        # Convert string parameters to enum values
+        event_type_enum = None
+        if event_type:
+            try:
+                event_type_enum = AuditEventType(event_type)
+            except ValueError:
+                pass
+
+        severity_enum = None
+        if severity:
+            try:
+                severity_enum = AuditSeverity(severity)
+            except ValueError:
+                pass
+
+        logs = audit_logger.get_logs(
+            limit=limit,
+            offset=offset,
+            event_type=event_type_enum,
+            severity=severity_enum,
+            user_id=user_id
+        )
+
+        return jsonify(logs)
+
+    except Exception as e:
+        logger.error(f"Error in audit logs API: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export-audit-logs')
+@login_required
+@audit_action(AuditEventType.DATA_EXPORT, AuditSeverity.HIGH, resource="audit", action="export_audit_logs")
+def export_audit_logs():
+    """Export audit logs."""
+    try:
+        format_type = request.args.get('format', 'json')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        exported_data = audit_logger.export_logs(
+            format=format_type,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"audit_logs_{timestamp}.{format_type}"
+
+        if format_type.lower() == 'json':
+            return jsonify({
+                'filename': filename,
+                'data': exported_data,
+                'timestamp': timestamp
+            })
+        else:
+            # For CSV, return as text
+            from flask import Response
+            return Response(
+                exported_data,
+                mimetype='text/csv',
+                headers={'Content-Disposition': f'attachment; filename={filename}'}
+            )
+
+    except Exception as e:
+        logger.error(f"Error exporting audit logs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/export')
 @login_required
+@audit_action(AuditEventType.DATA_EXPORT, AuditSeverity.MEDIUM, resource="system_data", action="export_port_data")
 def export_data():
     """Export port and process data as JSON."""
     ports = get_open_ports()

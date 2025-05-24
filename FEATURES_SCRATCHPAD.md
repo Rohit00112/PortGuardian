@@ -10,11 +10,11 @@ This document tracks potential features to implement in the PortGuardian applica
   - [ ] Heat maps showing process resource consumption
   - [ ] Implementation notes: Consider using Chart.js or D3.js for frontend visualizations
 
-- [ ] **System Health Dashboard**
-  - [ ] Overall system metrics (CPU, RAM, disk usage, network throughput)
+- [x] **System Health Dashboard**
+  - [x] Overall system metrics (CPU, RAM, disk usage, network throughput)
   - [ ] Temperature monitoring for critical components
-  - [ ] System uptime and load averages
-  - [ ] Implementation notes: Use psutil for backend data collection
+  - [x] System uptime and load averages
+  - [x] Implementation notes: Used psutil for backend data collection in utils/system_monitor.py
 
 - [ ] **Notification System**
   - [ ] Email/SMS alerts when critical processes crash
@@ -64,11 +64,11 @@ This document tracks potential features to implement in the PortGuardian applica
 
 ## User Experience Improvements
 
-- [ ] **Dark Mode**
-  - [ ] Implement a dark theme option
-  - [ ] Allow customizable color schemes
-  - [ ] Save user preferences
-  - [ ] Implementation notes: Use CSS variables for theming
+- [x] **Dark Mode**
+  - [x] Implement a dark theme option
+  - [x] Allow customizable color schemes
+  - [x] Save user preferences
+  - [x] Implementation notes: Used CSS variables for theming in dark-theme.css
 
 - [ ] **Mobile App**
   - [ ] Create a companion mobile application

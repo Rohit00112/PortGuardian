@@ -225,7 +225,6 @@ def api_collect_metrics():
     except Exception as e:
         logger.error(f"Error collecting metrics: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
-=======
 
 @app.route('/api/save-theme', methods=['POST'])
 @login_required

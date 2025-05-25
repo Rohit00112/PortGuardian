@@ -1,0 +1,263 @@
+/* PortGuardian Dark Theme */
+
+:root {
+    --dark-bg-primary: #121212;
+    --dark-bg-secondary: #1e1e1e;
+    --dark-bg-tertiary: #2d2d2d;
+    --dark-text-primary: #e0e0e0;
+    --dark-text-secondary: #a0a0a0;
+    --dark-border: #444444;
+    --dark-hover: #3a3a3a;
+    --dark-primary: #bb86fc;
+    --dark-primary-variant: #3700b3;
+    --dark-secondary: #03dac6;
+    --dark-error: #cf6679;
+    --dark-success: #4caf50;
+    --dark-warning: #ff9800;
+    --dark-info: #2196f3;
+}
+
+/* Base Elements */
+body.dark-mode {
+    background-color: var(--dark-bg-primary);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode a {
+    color: var(--dark-primary);
+}
+
+.dark-mode a:hover {
+    color: var(--dark-secondary);
+}
+
+/* Navbar */
+.dark-mode .navbar {
+    background-color: var(--dark-bg-secondary) !important;
+    border-bottom: 1px solid var(--dark-border);
+}
+
+.dark-mode .navbar-brand,
+.dark-mode .nav-link {
+    color: var(--dark-text-primary) !important;
+}
+
+.dark-mode .navbar-toggler-icon {
+    filter: invert(1);
+}
+
+/* Cards */
+.dark-mode .card {
+    background-color: var(--dark-bg-secondary);
+    border-color: var(--dark-border);
+}
+
+.dark-mode .card-header {
+    background-color: var(--dark-bg-tertiary);
+    border-bottom-color: var(--dark-border);
+}
+
+.dark-mode .card-footer {
+    background-color: var(--dark-bg-tertiary);
+    border-top-color: var(--dark-border);
+}
+
+/* Tables */
+.dark-mode .table {
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.dark-mode .table-hover tbody tr:hover {
+    background-color: var(--dark-hover);
+}
+
+.dark-mode .table th {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+}
+
+.dark-mode .table td {
+    border-color: var(--dark-border);
+}
+
+/* Forms */
+.dark-mode .form-control {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .form-control:focus {
+    background-color: var(--dark-bg-tertiary);
+    color: var(--dark-text-primary);
+    border-color: var(--dark-primary);
+}
+
+.dark-mode .input-group-text {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+    color: var(--dark-text-primary);
+}
+
+/* Buttons */
+.dark-mode .btn-primary {
+    background-color: var(--dark-primary);
+    border-color: var(--dark-primary-variant);
+}
+
+.dark-mode .btn-secondary {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+}
+
+.dark-mode .btn-light {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .btn-dark {
+    background-color: var(--dark-bg-primary);
+    border-color: var(--dark-border);
+}
+
+/* Alerts */
+.dark-mode .alert-primary {
+    background-color: rgba(187, 134, 252, 0.2);
+    border-color: var(--dark-primary);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .alert-secondary {
+    background-color: rgba(3, 218, 198, 0.2);
+    border-color: var(--dark-secondary);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .alert-success {
+    background-color: rgba(76, 175, 80, 0.2);
+    border-color: var(--dark-success);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .alert-danger {
+    background-color: rgba(207, 102, 121, 0.2);
+    border-color: var(--dark-error);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .alert-warning {
+    background-color: rgba(255, 152, 0, 0.2);
+    border-color: var(--dark-warning);
+    color: var(--dark-text-primary);
+}
+
+.dark-mode .alert-info {
+    background-color: rgba(33, 150, 243, 0.2);
+    border-color: var(--dark-info);
+    color: var(--dark-text-primary);
+}
+
+/* Badges */
+.dark-mode .badge {
+    background-color: var(--dark-bg-tertiary);
+}
+
+.dark-mode .badge-primary {
+    background-color: var(--dark-primary);
+}
+
+.dark-mode .badge-secondary {
+    background-color: var(--dark-secondary);
+}
+
+.dark-mode .badge-success {
+    background-color: var(--dark-success);
+}
+
+.dark-mode .badge-danger {
+    background-color: var(--dark-error);
+}
+
+.dark-mode .badge-warning {
+    background-color: var(--dark-warning);
+}
+
+.dark-mode .badge-info {
+    background-color: var(--dark-info);
+}
+
+/* Progress Bars */
+.dark-mode .progress {
+    background-color: var(--dark-bg-tertiary);
+}
+
+/* List Groups */
+.dark-mode .list-group-item {
+    background-color: var(--dark-bg-secondary);
+    border-color: var(--dark-border);
+    color: var(--dark-text-primary);
+}
+
+/* Modals */
+.dark-mode .modal-content {
+    background-color: var(--dark-bg-secondary);
+    border-color: var(--dark-border);
+}
+
+.dark-mode .modal-header,
+.dark-mode .modal-footer {
+    background-color: var(--dark-bg-tertiary);
+    border-color: var(--dark-border);
+}
+
+.dark-mode .close {
+    color: var(--dark-text-primary);
+}
+
+/* Footer */
+.dark-mode footer {
+    background-color: var(--dark-bg-secondary) !important;
+    color: var(--dark-text-primary) !important;
+}
+
+/* Custom Elements */
+.dark-mode .system-info-item {
+    border-bottom-color: var(--dark-border);
+}
+
+.dark-mode .process-link {
+    color: var(--dark-primary);
+}
+
+.dark-mode .process-link:hover {
+    color: var(--dark-secondary);
+}
+
+.dark-mode .connection-item {
+    background-color: var(--dark-bg-tertiary);
+    border-left-color: var(--dark-primary);
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 20px;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-toggle i {
+    transition: transform 0.3s ease;
+}
+
+.theme-toggle:hover i {
+    transform: rotate(30deg);
+}

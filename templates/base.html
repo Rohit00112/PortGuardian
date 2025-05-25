@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dark-theme.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -33,6 +34,10 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('charts') }}">
                             <i class="fas fa-chart-line me-1"></i> Charts
+                        <a class="nav-link" href="{{ url_for('audit_logs') }}">
+                            <i class="fas fa-clipboard-list me-1"></i> Audit Logs
+                        <a class="nav-link" href="{{ url_for('system_health') }}">
+                            <i class="fas fa-heartbeat me-1"></i> System Health
                         </a>
                     </li>
                     <li class="nav-item">
@@ -52,6 +57,11 @@
                         </a>
                     </li>
                     {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link theme-toggle" id="themeToggle" href="javascript:void(0);">
+                            <i id="themeIcon" class="fas fa-moon me-1"></i> Theme
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -88,6 +98,7 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/theme-switcher.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

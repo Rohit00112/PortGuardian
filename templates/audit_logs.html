@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+
+{% block title %}Audit Logs - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .audit-card {
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+    }
+    .audit-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .severity-badge {
+        font-weight: 600;
+        padding: 0.5em 0.8em;
+    }
+    .event-type-badge {
+        font-weight: 500;
+        padding: 0.4em 0.6em;
+    }
+    .log-details {
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        padding: 10px;
+        margin-top: 10px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+    .dark-mode .log-details {
+        background-color: var(--dark-bg-tertiary);
+        color: var(--dark-text-primary);
+    }
+    .filter-card {
+        position: sticky;
+        top: 20px;
+        z-index: 100;
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .stat-item {
+        text-align: center;
+        padding: 15px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 8px;
+    }
+    .stat-number {
+        font-size: 2em;
+        font-weight: bold;
+        display: block;
+    }
+    .stat-label {
+        font-size: 0.9em;
+        opacity: 0.9;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Audit Logs</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- Statistics Overview -->
+<div class="stats-grid">
+    <div class="stat-item">
+        <span class="stat-number">{{ stats.total_logs }}</span>
+        <span class="stat-label">Total Events</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-number">{{ stats.recent_activity }}</span>
+        <span class="stat-label">Last 24 Hours</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-number">{{ stats.failed_events }}</span>
+        <span class="stat-label">Failed Events</span>
+    </div>
+    <div class="stat-item">
+        <span class="stat-number">{{ stats.top_users|length }}</span>
+        <span class="stat-label">Active Users</span>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Filters -->
+    <div class="col-md-3">
+        <div class="card shadow filter-card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-filter me-2"></i>Filters</h5>
+            </div>
+            <div class="card-body">
+                <form method="GET" action="{{ url_for('audit_logs') }}">
+                    <div class="mb-3">
+                        <label for="event_type" class="form-label">Event Type</label>
+                        <select class="form-select" id="event_type" name="event_type">
+                            <option value="">All Events</option>
+                            {% for event_type in event_types %}
+                            <option value="{{ event_type }}" {% if request.args.get('event_type') == event_type %}selected{% endif %}>
+                                {{ event_type.replace('_', ' ').title() }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="severity" class="form-label">Severity</label>
+                        <select class="form-select" id="severity" name="severity">
+                            <option value="">All Severities</option>
+                            {% for severity in severities %}
+                            <option value="{{ severity }}" {% if request.args.get('severity') == severity %}selected{% endif %}>
+                                {{ severity.title() }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="user_id" class="form-label">User ID</label>
+                        <input type="text" class="form-control" id="user_id" name="user_id" 
+                               value="{{ request.args.get('user_id', '') }}" placeholder="Enter user ID">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="per_page" class="form-label">Per Page</label>
+                        <select class="form-select" id="per_page" name="per_page">
+                            <option value="25" {% if request.args.get('per_page') == '25' %}selected{% endif %}>25</option>
+                            <option value="50" {% if request.args.get('per_page') == '50' or not request.args.get('per_page') %}selected{% endif %}>50</option>
+                            <option value="100" {% if request.args.get('per_page') == '100' %}selected{% endif %}>100</option>
+                        </select>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-search me-1"></i>Apply Filters
+                        </button>
+                        <a href="{{ url_for('audit_logs') }}" class="btn btn-secondary">
+                            <i class="fas fa-times me-1"></i>Clear Filters
+                        </a>
+                    </div>
+                </form>
+                
+                <hr>
+                
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('export_audit_logs', format='json') }}" class="btn btn-success btn-sm">
+                        <i class="fas fa-download me-1"></i>Export JSON
+                    </a>
+                    <a href="{{ url_for('export_audit_logs', format='csv') }}" class="btn btn-info btn-sm">
+                        <i class="fas fa-file-csv me-1"></i>Export CSV
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Audit Logs -->
+    <div class="col-md-9">
+        <div class="card shadow">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-clipboard-list me-2"></i>Audit Logs</h4>
+                <div>
+                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if logs %}
+                <div class="row">
+                    {% for log in logs %}
+                    <div class="col-12 mb-3">
+                        <div class="card audit-card">
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <div class="d-flex align-items-center mb-2">
+                                            <span class="badge event-type-badge bg-{% if log.event_type == 'login' %}success{% elif log.event_type == 'logout' %}info{% elif log.event_type == 'process_kill' %}danger{% elif log.event_type == 'error' %}warning{% else %}secondary{% endif %} me-2">
+                                                {{ log.event_type.replace('_', ' ').title() }}
+                                            </span>
+                                            <span class="badge severity-badge bg-{% if log.severity == 'critical' %}danger{% elif log.severity == 'high' %}warning{% elif log.severity == 'medium' %}info{% else %}secondary{% endif %}">
+                                                {{ log.severity.title() }}
+                                            </span>
+                                            {% if not log.success %}
+                                            <span class="badge bg-danger ms-2">FAILED</span>
+                                            {% endif %}
+                                        </div>
+                                        
+                                        <h6 class="card-title mb-1">
+                                            {% if log.action %}
+                                                {{ log.action.replace('_', ' ').title() }}
+                                            {% else %}
+                                                {{ log.event_type.replace('_', ' ').title() }}
+                                            {% endif %}
+                                        </h6>
+                                        
+                                        <div class="text-muted small">
+                                            <div><strong>User:</strong> {{ log.username or 'Anonymous' }}</div>
+                                            <div><strong>Resource:</strong> {{ log.resource or 'N/A' }}</div>
+                                            <div><strong>IP:</strong> {{ log.ip_address or 'N/A' }}</div>
+                                            {% if log.error_message %}
+                                            <div class="text-danger"><strong>Error:</strong> {{ log.error_message }}</div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="col-md-4 text-end">
+                                        <div class="text-muted small">
+                                            <div><strong>{{ log.timestamp[:19] }}</strong></div>
+                                            <div>ID: {{ log.id }}</div>
+                                        </div>
+                                        
+                                        {% if log.details %}
+                                        <button class="btn btn-sm btn-outline-primary mt-2" type="button" 
+                                                data-bs-toggle="collapse" data-bs-target="#details-{{ log.id }}">
+                                            <i class="fas fa-info-circle me-1"></i>Details
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                
+                                {% if log.details %}
+                                <div class="collapse mt-3" id="details-{{ log.id }}">
+                                    <div class="log-details">
+                                        <strong>Details:</strong>
+                                        <pre class="mb-0">{{ log.details | tojson(indent=2) if log.details is mapping else log.details }}</pre>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <!-- Pagination -->
+                <nav aria-label="Audit logs pagination">
+                    <ul class="pagination justify-content-center">
+                        {% if page > 1 %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('audit_logs', page=page-1, **request.args) }}">Previous</a>
+                        </li>
+                        {% endif %}
+                        
+                        <li class="page-item active">
+                            <span class="page-link">Page {{ page }}</span>
+                        </li>
+                        
+                        {% if logs|length == per_page %}
+                        <li class="page-item">
+                            <a class="page-link" href="{{ url_for('audit_logs', page=page+1, **request.args) }}">Next</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+                
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-clipboard-list fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No audit logs found</h5>
+                    <p class="text-muted">Try adjusting your filters or check back later.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Handle refresh button click
+        $('#refreshBtn').click(function() {
+            location.reload();
+        });
+        
+        // Auto-refresh every 30 seconds
+        setTimeout(function() {
+            location.reload();
+        }, 30000);
+    });
+</script>
+{% endblock %}

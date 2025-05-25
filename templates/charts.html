@@ -1,0 +1,580 @@
+{% extends 'base.html' %}
+
+{% block title %}Real-time Charts - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chart-container {
+        position: relative;
+        height: 400px;
+        margin-bottom: 30px;
+    }
+    .chart-card {
+        transition: all 0.3s ease;
+    }
+    .chart-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    .chart-controls {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .time-range-buttons {
+        display: flex;
+        gap: 5px;
+    }
+    .loading-spinner {
+        display: none;
+        text-align: center;
+        padding: 20px;
+    }
+    .chart-error {
+        display: none;
+        text-align: center;
+        padding: 20px;
+        color: #dc3545;
+    }
+    .metric-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+        margin-bottom: 15px;
+    }
+    .metric-item {
+        text-align: center;
+        padding: 10px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 6px;
+        font-size: 0.9em;
+    }
+    .metric-value {
+        font-size: 1.2em;
+        font-weight: bold;
+        display: block;
+    }
+    .metric-label {
+        opacity: 0.9;
+        font-size: 0.8em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Real-time Charts</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-chart-line me-2"></i>System Metrics Charts</h4>
+                <div>
+                    <button id="refreshAllBtn" class="btn btn-light btn-sm me-2">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh All
+                    </button>
+                    <button id="collectMetricsBtn" class="btn btn-success btn-sm">
+                        <i class="fas fa-database me-1"></i>Collect Now
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CPU Charts -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow chart-card">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>CPU Usage</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-controls">
+                    <div class="metric-summary" id="cpuSummary">
+                        <!-- CPU summary will be populated here -->
+                    </div>
+                    <div class="time-range-buttons">
+                        <button class="btn btn-sm btn-outline-primary time-range-btn" data-chart="cpu" data-hours="1">1H</button>
+                        <button class="btn btn-sm btn-outline-primary time-range-btn" data-chart="cpu" data-hours="6">6H</button>
+                        <button class="btn btn-sm btn-primary time-range-btn active" data-chart="cpu" data-hours="24">24H</button>
+                        <button class="btn btn-sm btn-outline-primary time-range-btn" data-chart="cpu" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <div class="loading-spinner" id="cpuLoading">
+                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                    <p>Loading CPU data...</p>
+                </div>
+                <div class="chart-error" id="cpuError">
+                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                    <p>Error loading CPU data</p>
+                </div>
+                <div class="chart-container">
+                    <canvas id="cpuChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Memory Charts -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow chart-card">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0"><i class="fas fa-memory me-2"></i>Memory Usage</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-controls">
+                    <div class="metric-summary" id="memorySummary">
+                        <!-- Memory summary will be populated here -->
+                    </div>
+                    <div class="time-range-buttons">
+                        <button class="btn btn-sm btn-outline-warning time-range-btn" data-chart="memory" data-hours="1">1H</button>
+                        <button class="btn btn-sm btn-outline-warning time-range-btn" data-chart="memory" data-hours="6">6H</button>
+                        <button class="btn btn-sm btn-warning time-range-btn active" data-chart="memory" data-hours="24">24H</button>
+                        <button class="btn btn-sm btn-outline-warning time-range-btn" data-chart="memory" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <div class="loading-spinner" id="memoryLoading">
+                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                    <p>Loading memory data...</p>
+                </div>
+                <div class="chart-error" id="memoryError">
+                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                    <p>Error loading memory data</p>
+                </div>
+                <div class="chart-container">
+                    <canvas id="memoryChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Load Charts -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow chart-card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-tachometer-alt me-2"></i>System Load</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-controls">
+                    <div class="metric-summary" id="loadSummary">
+                        <!-- Load summary will be populated here -->
+                    </div>
+                    <div class="time-range-buttons">
+                        <button class="btn btn-sm btn-outline-success time-range-btn" data-chart="load" data-hours="1">1H</button>
+                        <button class="btn btn-sm btn-outline-success time-range-btn" data-chart="load" data-hours="6">6H</button>
+                        <button class="btn btn-sm btn-success time-range-btn active" data-chart="load" data-hours="24">24H</button>
+                        <button class="btn btn-sm btn-outline-success time-range-btn" data-chart="load" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <div class="loading-spinner" id="loadLoading">
+                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                    <p>Loading load data...</p>
+                </div>
+                <div class="chart-error" id="loadError">
+                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                    <p>Error loading load data</p>
+                </div>
+                <div class="chart-container">
+                    <canvas id="loadChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Network Charts -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow chart-card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-network-wired me-2"></i>Network Traffic</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-controls">
+                    <div class="metric-summary" id="networkSummary">
+                        <!-- Network summary will be populated here -->
+                    </div>
+                    <div class="time-range-buttons">
+                        <button class="btn btn-sm btn-outline-info time-range-btn" data-chart="network" data-hours="1">1H</button>
+                        <button class="btn btn-sm btn-outline-info time-range-btn" data-chart="network" data-hours="6">6H</button>
+                        <button class="btn btn-sm btn-info time-range-btn active" data-chart="network" data-hours="24">24H</button>
+                        <button class="btn btn-sm btn-outline-info time-range-btn" data-chart="network" data-hours="168">7D</button>
+                    </div>
+                </div>
+                <div class="loading-spinner" id="networkLoading">
+                    <i class="fas fa-spinner fa-spin fa-2x"></i>
+                    <p>Loading network data...</p>
+                </div>
+                <div class="chart-error" id="networkError">
+                    <i class="fas fa-exclamation-triangle fa-2x"></i>
+                    <p>Error loading network data</p>
+                </div>
+                <div class="chart-container">
+                    <canvas id="networkChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+<script>
+    // Chart instances
+    let charts = {};
+    
+    // Chart configurations
+    const chartConfigs = {
+        cpu: {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    },
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                                day: 'MM/dd'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        memory: {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        ticks: {
+                            callback: function(value) {
+                                return value + '%';
+                            }
+                        }
+                    },
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                                day: 'MM/dd'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                }
+            }
+        },
+        load: {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(2);
+                            }
+                        }
+                    },
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                                day: 'MM/dd'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    }
+                }
+            }
+        },
+        network: {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return formatBytes(value);
+                            }
+                        }
+                    },
+                    x: {
+                        type: 'time',
+                        time: {
+                            displayFormats: {
+                                minute: 'HH:mm',
+                                hour: 'HH:mm',
+                                day: 'MM/dd'
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + formatBytes(context.parsed.y);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    
+    // Color schemes for different metrics
+    const colorSchemes = {
+        cpu: ['#dc3545', '#fd7e14', '#ffc107', '#28a745'],
+        memory: ['#6f42c1', '#e83e8c'],
+        load: ['#20c997', '#17a2b8', '#6610f2'],
+        network: ['#007bff', '#28a745', '#dc3545', '#ffc107', '#6f42c1', '#fd7e14']
+    };
+    
+    // Utility function to format bytes
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    // Load chart data
+    function loadChartData(chartType, hours = 24) {
+        const loadingEl = document.getElementById(chartType + 'Loading');
+        const errorEl = document.getElementById(chartType + 'Error');
+        const summaryEl = document.getElementById(chartType + 'Summary');
+        
+        // Show loading
+        loadingEl.style.display = 'block';
+        errorEl.style.display = 'none';
+        
+        fetch(`/api/chart-data/${chartType}?hours=${hours}`)
+            .then(response => response.json())
+            .then(data => {
+                loadingEl.style.display = 'none';
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                updateChart(chartType, data);
+                updateSummary(chartType, data, summaryEl);
+            })
+            .catch(error => {
+                console.error('Error loading chart data:', error);
+                loadingEl.style.display = 'none';
+                errorEl.style.display = 'block';
+                errorEl.querySelector('p').textContent = 'Error: ' + error.message;
+            });
+    }
+    
+    // Update chart with new data
+    function updateChart(chartType, data) {
+        const ctx = document.getElementById(chartType + 'Chart').getContext('2d');
+        
+        // Destroy existing chart if it exists
+        if (charts[chartType]) {
+            charts[chartType].destroy();
+        }
+        
+        // Prepare datasets
+        const datasets = [];
+        const colors = colorSchemes[chartType];
+        let colorIndex = 0;
+        
+        for (const [metricName, metricData] of Object.entries(data)) {
+            const color = colors[colorIndex % colors.length];
+            
+            datasets.push({
+                label: metricName.replace(/_/g, ' ').replace(/percent/g, '%'),
+                data: metricData.map(point => ({
+                    x: new Date(point.timestamp),
+                    y: point.value
+                })),
+                borderColor: color,
+                backgroundColor: color + '20',
+                fill: false,
+                tension: 0.1
+            });
+            
+            colorIndex++;
+        }
+        
+        // Create new chart
+        const config = {
+            ...chartConfigs[chartType],
+            data: { datasets }
+        };
+        
+        charts[chartType] = new Chart(ctx, config);
+    }
+    
+    // Update summary metrics
+    function updateSummary(chartType, data, summaryEl) {
+        summaryEl.innerHTML = '';
+        
+        for (const [metricName, metricData] of Object.entries(data)) {
+            if (metricData.length === 0) continue;
+            
+            const latestValue = metricData[metricData.length - 1].value;
+            const unit = metricData[metricData.length - 1].unit || '';
+            
+            const metricItem = document.createElement('div');
+            metricItem.className = 'metric-item';
+            metricItem.innerHTML = `
+                <span class="metric-value">${latestValue.toFixed(1)}${unit}</span>
+                <span class="metric-label">${metricName.replace(/_/g, ' ')}</span>
+            `;
+            
+            summaryEl.appendChild(metricItem);
+        }
+    }
+    
+    // Initialize charts
+    function initializeCharts() {
+        loadChartData('cpu');
+        loadChartData('memory');
+        loadChartData('load');
+        loadChartData('network');
+    }
+    
+    // Event listeners
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize charts
+        initializeCharts();
+        
+        // Time range buttons
+        document.querySelectorAll('.time-range-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const chartType = this.dataset.chart;
+                const hours = parseInt(this.dataset.hours);
+                
+                // Update active button
+                this.parentElement.querySelectorAll('.time-range-btn').forEach(b => {
+                    b.classList.remove('active');
+                    b.classList.add('btn-outline-' + (chartType === 'cpu' ? 'primary' : chartType === 'memory' ? 'warning' : chartType === 'load' ? 'success' : 'info'));
+                    b.classList.remove('btn-' + (chartType === 'cpu' ? 'primary' : chartType === 'memory' ? 'warning' : chartType === 'load' ? 'success' : 'info'));
+                });
+                
+                this.classList.add('active');
+                this.classList.remove('btn-outline-' + (chartType === 'cpu' ? 'primary' : chartType === 'memory' ? 'warning' : chartType === 'load' ? 'success' : 'info'));
+                this.classList.add('btn-' + (chartType === 'cpu' ? 'primary' : chartType === 'memory' ? 'warning' : chartType === 'load' ? 'success' : 'info'));
+                
+                loadChartData(chartType, hours);
+            });
+        });
+        
+        // Refresh all button
+        document.getElementById('refreshAllBtn').addEventListener('click', function() {
+            initializeCharts();
+        });
+        
+        // Collect metrics button
+        document.getElementById('collectMetricsBtn').addEventListener('click', function() {
+            const btn = this;
+            const originalText = btn.innerHTML;
+            
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Collecting...';
+            btn.disabled = true;
+            
+            fetch('/api/metrics/collect', { method: 'GET' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Refresh charts after a short delay
+                        setTimeout(() => {
+                            initializeCharts();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error collecting metrics:', error);
+                })
+                .finally(() => {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                });
+        });
+        
+        // Auto-refresh every 60 seconds
+        setInterval(initializeCharts, 60000);
+    });
+</script>
+{% endblock %}

@@ -8,6 +8,8 @@ from datetime import datetime
 
 from utils.port_scanner import get_open_ports
 from utils.process_manager import get_process_info, kill_process
+from utils.metrics_storage import metrics_storage
+from utils.metrics_collector import metrics_collector
 
 # Configure logging
 logging.basicConfig(
@@ -128,6 +130,73 @@ def api_process(pid):
         return jsonify({'error': 'Process not found'}), 404
     return jsonify(process_info)
 
+@app.route('/charts')
+@login_required
+def charts():
+    """Real-time charts dashboard."""
+    return render_template('charts.html')
+
+@app.route('/api/chart-data/<metric_type>')
+@login_required
+def api_chart_data(metric_type):
+    """API endpoint to get chart data for specific metric type."""
+    try:
+        hours = int(request.args.get('hours', 24))
+
+        # Define metric names for each type
+        metric_mappings = {
+            'cpu': ['overall_percent', 'core_0_percent', 'core_1_percent'],
+            'memory': ['virtual_percent', 'swap_percent'],
+            'load': ['load_1_min', 'load_5_min', 'load_15_min'],
+            'disk': [],  # Will be populated dynamically
+            'network': []  # Will be populated dynamically
+        }
+
+        # For disk and network, get available metrics dynamically
+        if metric_type == 'disk':
+            # Get recent disk metrics to determine available partitions
+            recent_metrics = metrics_storage.get_metrics(metric_type='disk', limit=10)
+            disk_metrics = set()
+            for metric in recent_metrics:
+                if metric['metric_name'].endswith('_percent'):
+                    disk_metrics.add(metric['metric_name'])
+            metric_mappings['disk'] = list(disk_metrics)[:5]  # Limit to 5 partitions
+
+        elif metric_type == 'network':
+            # Get recent network metrics to determine available interfaces
+            recent_metrics = metrics_storage.get_metrics(metric_type='network', limit=10)
+            network_metrics = set()
+            for metric in recent_metrics:
+                if 'bytes_sent' in metric['metric_name']:
+                    interface = metric['metric_name'].replace('_bytes_sent', '')
+                    network_metrics.add(f"{interface}_bytes_sent")
+                    network_metrics.add(f"{interface}_bytes_recv")
+            metric_mappings['network'] = list(network_metrics)[:6]  # Limit to 3 interfaces (sent/recv)
+
+        metric_names = metric_mappings.get(metric_type, [])
+
+        if not metric_names:
+            return jsonify({'error': f'No metrics available for type: {metric_type}'}), 404
+
+        chart_data = metrics_storage.get_chart_data(metric_type, metric_names, hours)
+
+        return jsonify(chart_data)
+
+    except Exception as e:
+        logger.error(f"Error getting chart data: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/metrics/collect')
+@login_required
+def api_collect_metrics():
+    """API endpoint to manually trigger metrics collection."""
+    try:
+        metrics_collector.collect_now()
+        return jsonify({'success': True, 'message': 'Metrics collected successfully'})
+    except Exception as e:
+        logger.error(f"Error collecting metrics: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/export')
 @login_required
 def export_data():
@@ -144,4 +213,11 @@ def export_data():
     })
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    # Start the metrics collector
+    metrics_collector.start()
+
+    try:
+        app.run(debug=True, host='0.0.0.0', port=5001)
+    finally:
+        # Stop the metrics collector when the app shuts down
+        metrics_collector.stop()

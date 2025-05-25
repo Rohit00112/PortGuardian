@@ -4,11 +4,11 @@ This document tracks potential features to implement in the PortGuardian applica
 
 ## Monitoring & Visualization Enhancements
 
-- [ ] **Real-time Graphs and Charts**
-  - [ ] Interactive charts showing CPU/memory usage over time
+- [x] **Real-time Graphs and Charts**
+  - [x] Interactive charts showing CPU/memory usage over time
   - [ ] Network traffic visualizations for each port
   - [ ] Heat maps showing process resource consumption
-  - [ ] Implementation notes: Consider using Chart.js or D3.js for frontend visualizations
+  - [x] Implementation notes: Used Chart.js for frontend visualizations with metrics_storage.py backend
 
 - [ ] **System Health Dashboard**
   - [ ] Overall system metrics (CPU, RAM, disk usage, network throughput)

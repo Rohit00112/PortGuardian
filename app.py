@@ -10,6 +10,8 @@ from utils.port_scanner import get_open_ports
 from utils.process_manager import get_process_info, kill_process
 from utils.metrics_storage import metrics_storage
 from utils.metrics_collector import metrics_collector
+from utils.api_auth import api_key_manager
+from api.endpoints import api_bp
 from utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from utils.audit_decorators import audit_action, audit_login_attempt, audit_logout, audit_process_kill
 from utils.system_monitor import get_all_system_metrics
@@ -32,6 +34,9 @@ app.config['SESSION_TYPE'] = 'filesystem'
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# Register API blueprint
+app.register_blueprint(api_bp)
 
 # Simple user model for authentication
 class User(UserMixin):
@@ -410,6 +415,124 @@ def api_system_health():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api-management')
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="api_management", action="view_api_management")
+def api_management():
+    """API management interface."""
+    return render_template('api_management.html')
+
+@app.route('/api/admin/keys')
+@login_required
+def admin_api_keys():
+    """Admin endpoint to manage API keys (web interface)."""
+    try:
+        keys = api_key_manager.get_api_keys()
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'keys': keys,
+                'count': len(keys)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting API keys: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/keys', methods=['POST'])
+@login_required
+def admin_create_api_key():
+    """Admin endpoint to create API keys (web interface)."""
+    try:
+        data = request.get_json()
+
+        if not data or 'name' not in data:
+            return jsonify({
+                'status': 'error',
+                'message': 'Name is required'
+            }), 400
+
+        key_info = api_key_manager.generate_api_key(
+            name=data['name'],
+            description=data.get('description', ''),
+            permissions=data.get('permissions', ['read']),
+            created_by=current_user.username,
+            expires_days=data.get('expires_days')
+        )
+
+        # Audit the API key creation
+        audit_logger.log_event(
+            event_type=AuditEventType.API_ACCESS,
+            severity=AuditSeverity.HIGH,
+            user_id=str(current_user.id),
+            username=current_user.username,
+            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
+            user_agent=request.headers.get('User-Agent', ''),
+            resource='api_key_management',
+            action='create_api_key',
+            details={
+                'key_name': data['name'],
+                'permissions': data.get('permissions', ['read'])
+            },
+            success=True
+        )
+
+        return jsonify({
+            'status': 'success',
+            'data': key_info
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Error creating API key: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/keys/<key_id>', methods=['DELETE'])
+@login_required
+def admin_revoke_api_key(key_id):
+    """Admin endpoint to revoke API keys (web interface)."""
+    try:
+        success = api_key_manager.revoke_api_key(key_id)
+
+        # Audit the API key revocation
+        audit_logger.log_event(
+            event_type=AuditEventType.API_ACCESS,
+            severity=AuditSeverity.HIGH,
+            user_id=str(current_user.id),
+            username=current_user.username,
+            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
+            user_agent=request.headers.get('User-Agent', ''),
+            resource='api_key_management',
+            action='revoke_api_key',
+            details={
+                'key_id': key_id
+            },
+            success=success
+        )
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'API key {key_id} has been revoked'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'API key {key_id} not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error revoking API key: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
 @app.route('/export')
 @login_required
 @audit_action(AuditEventType.DATA_EXPORT, AuditSeverity.MEDIUM, resource="system_data", action="export_port_data")
@@ -417,7 +540,6 @@ def export_data():
     """Export port and process data as JSON."""
     ports = get_open_ports()
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"port_data_{timestamp}.json"
 
     # In a real application, you would save this file and provide a download link
     # For simplicity, we'll just return the JSON

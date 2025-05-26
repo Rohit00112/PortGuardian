@@ -1,0 +1,476 @@
+{% extends 'base.html' %}
+
+{% block title %}API Management - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .api-card {
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+    }
+    .api-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .api-key-display {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 10px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+        word-break: break-all;
+    }
+    .dark-mode .api-key-display {
+        background-color: var(--dark-bg-tertiary);
+        border-color: var(--dark-border);
+        color: var(--dark-text-primary);
+    }
+    .permission-badge {
+        font-size: 0.8em;
+        padding: 0.3em 0.6em;
+        margin: 0.2em;
+    }
+    .api-docs-section {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    .endpoint-item {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    .method-badge {
+        font-weight: bold;
+        padding: 0.2em 0.5em;
+        border-radius: 3px;
+        font-size: 0.8em;
+    }
+    .method-get { background-color: #28a745; }
+    .method-post { background-color: #007bff; }
+    .method-delete { background-color: #dc3545; }
+    .method-put { background-color: #ffc107; color: #000; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">API Management</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- API Documentation Section -->
+<div class="api-docs-section">
+    <h4><i class="fas fa-book me-2"></i>API Documentation</h4>
+    <p>PortGuardian provides a comprehensive RESTful API for programmatic access to system monitoring data.</p>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h6>Base URL</h6>
+            <code>{{ request.url_root }}api/v1</code>
+
+            <h6 class="mt-3">Authentication</h6>
+            <p>Include your API key in the <code>X-API-Key</code> header:</p>
+            <code>X-API-Key: pg_your_key_id_your_secret</code>
+        </div>
+        <div class="col-md-6">
+            <h6>Response Format</h6>
+            <div class="endpoint-item">
+                <pre class="mb-0">{
+  "status": "success|error",
+  "data": { ... },
+  "message": "error message if applicable"
+}</pre>
+            </div>
+        </div>
+    </div>
+
+    <h6 class="mt-3">Key Endpoints</h6>
+    <div class="row">
+        <div class="col-md-6">
+            <div class="endpoint-item">
+                <span class="method-badge method-get">GET</span> <code>/system/health</code><br>
+                <small>Get comprehensive system metrics</small>
+            </div>
+            <div class="endpoint-item">
+                <span class="method-badge method-get">GET</span> <code>/ports</code><br>
+                <small>Get all open ports and processes</small>
+            </div>
+            <div class="endpoint-item">
+                <span class="method-badge method-get">GET</span> <code>/processes/{pid}</code><br>
+                <small>Get detailed process information</small>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="endpoint-item">
+                <span class="method-badge method-delete">DELETE</span> <code>/processes/{pid}</code><br>
+                <small>Terminate a process (write permission)</small>
+            </div>
+            <div class="endpoint-item">
+                <span class="method-badge method-get">GET</span> <code>/metrics/history</code><br>
+                <small>Get historical metrics data</small>
+            </div>
+            <div class="endpoint-item">
+                <span class="method-badge method-get">GET</span> <code>/docs</code><br>
+                <small>Complete API documentation</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- API Key Management -->
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-key me-2"></i>API Keys</h5>
+                <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#createKeyModal">
+                    <i class="fas fa-plus me-1"></i>Create New Key
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="apiKeysContainer">
+                    <div class="text-center py-4">
+                        <i class="fas fa-spinner fa-spin fa-2x text-muted"></i>
+                        <p class="text-muted mt-2">Loading API keys...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card shadow">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-shield-alt me-2"></i>Permissions</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <span class="badge bg-success permission-badge">read</span>
+                    <p class="small mb-0">Read-only access to system information, ports, processes, and metrics.</p>
+                </div>
+                <div class="mb-3">
+                    <span class="badge bg-warning permission-badge">write</span>
+                    <p class="small mb-0">Read access plus ability to terminate processes and modify system state.</p>
+                </div>
+                <div class="mb-3">
+                    <span class="badge bg-danger permission-badge">admin</span>
+                    <p class="small mb-0">Full administrative access including API key management and audit logs.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow mt-3">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Security Notes</h5>
+            </div>
+            <div class="card-body">
+                <ul class="small mb-0">
+                    <li>API keys are displayed only once upon creation</li>
+                    <li>Store keys securely and never share them</li>
+                    <li>Revoke unused or compromised keys immediately</li>
+                    <li>Use least privilege principle for permissions</li>
+                    <li>Monitor API usage in audit logs</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create API Key Modal -->
+<div class="modal fade" id="createKeyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-plus me-2"></i>Create New API Key</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="createKeyForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="keyName" class="form-label">Name *</label>
+                        <input type="text" class="form-control" id="keyName" name="name" required
+                               placeholder="e.g., Production Monitor, Dev Integration">
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="keyDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="keyDescription" name="description" rows="2"
+                                  placeholder="Optional description of what this key will be used for"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Permissions *</label>
+                        <div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="read" id="permRead" name="permissions" checked>
+                                <label class="form-check-label" for="permRead">
+                                    <span class="badge bg-success me-2">read</span> Read-only access
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="write" id="permWrite" name="permissions">
+                                <label class="form-check-label" for="permWrite">
+                                    <span class="badge bg-warning me-2">write</span> Write access (process termination)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="admin" id="permAdmin" name="permissions">
+                                <label class="form-check-label" for="permAdmin">
+                                    <span class="badge bg-danger me-2">admin</span> Administrative access
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="expiryDays" class="form-label">Expiry (days)</label>
+                        <select class="form-select" id="expiryDays" name="expires_days">
+                            <option value="">Never expires</option>
+                            <option value="30">30 days</option>
+                            <option value="90">90 days</option>
+                            <option value="365">1 year</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-key me-1"></i>Create API Key
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- API Key Display Modal -->
+<div class="modal fade" id="keyDisplayModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fas fa-check-circle me-2"></i>API Key Created Successfully</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Important:</strong> This is the only time you'll see this API key. Please copy and store it securely.
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label"><strong>API Key:</strong></label>
+                    <div class="api-key-display" id="newApiKey"></div>
+                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="copyApiKey()">
+                        <i class="fas fa-copy me-1"></i>Copy to Clipboard
+                    </button>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label"><strong>Usage Example:</strong></label>
+                    <div class="api-key-display">
+curl -H "X-API-Key: <span id="exampleKey"></span>" {{ request.url_root }}api/v1/system/health
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">I've Saved the Key</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let apiKeys = [];
+
+    // Load API keys on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        loadApiKeys();
+
+        // Handle create key form submission
+        document.getElementById('createKeyForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            createApiKey();
+        });
+    });
+
+    function loadApiKeys() {
+        fetch('/api/admin/keys')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                apiKeys = data.data.keys;
+                renderApiKeys();
+            } else {
+                document.getElementById('apiKeysContainer').innerHTML = `
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Unable to load API keys. You may need administrative privileges.
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('Error loading API keys:', error);
+            document.getElementById('apiKeysContainer').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Error loading API keys: ${error.message}
+                </div>
+            `;
+        });
+    }
+
+    function renderApiKeys() {
+        const container = document.getElementById('apiKeysContainer');
+
+        if (apiKeys.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-4">
+                    <i class="fas fa-key fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No API Keys</h5>
+                    <p class="text-muted">Create your first API key to get started.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = apiKeys.map(key => `
+            <div class="card api-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h6 class="card-title mb-1">${key.name}</h6>
+                            <p class="card-text text-muted small mb-2">${key.description || 'No description'}</p>
+                            <div class="mb-2">
+                                ${key.permissions.split(',').map(perm =>
+                                    `<span class="badge bg-${perm === 'read' ? 'success' : perm === 'write' ? 'warning' : 'danger'} permission-badge">${perm}</span>`
+                                ).join('')}
+                            </div>
+                            <div class="small text-muted">
+                                <div><strong>Created:</strong> ${new Date(key.created_at).toLocaleDateString()}</div>
+                                <div><strong>Last Used:</strong> ${key.last_used ? new Date(key.last_used).toLocaleDateString() : 'Never'}</div>
+                                ${key.expires_at ? `<div><strong>Expires:</strong> ${new Date(key.expires_at).toLocaleDateString()}</div>` : ''}
+                            </div>
+                        </div>
+                        <div>
+                            <span class="badge bg-${key.is_active ? 'success' : 'secondary'} mb-2">
+                                ${key.is_active ? 'Active' : 'Revoked'}
+                            </span>
+                            ${key.is_active ? `
+                                <button class="btn btn-sm btn-outline-danger" onclick="revokeApiKey('${key.key_id}', '${key.name}')">
+                                    <i class="fas fa-ban me-1"></i>Revoke
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function createApiKey() {
+        const form = document.getElementById('createKeyForm');
+        const formData = new FormData(form);
+
+        // Get selected permissions
+        const permissions = Array.from(form.querySelectorAll('input[name="permissions"]:checked'))
+                                .map(cb => cb.value);
+
+        if (permissions.length === 0) {
+            alert('Please select at least one permission.');
+            return;
+        }
+
+        const data = {
+            name: formData.get('name'),
+            description: formData.get('description'),
+            permissions: permissions,
+            expires_days: formData.get('expires_days') ? parseInt(formData.get('expires_days')) : null
+        };
+
+        fetch('/api/admin/keys', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Show the new API key
+                document.getElementById('newApiKey').textContent = data.data.api_key;
+                document.getElementById('exampleKey').textContent = data.data.api_key;
+
+                // Hide create modal and show display modal
+                bootstrap.Modal.getInstance(document.getElementById('createKeyModal')).hide();
+                new bootstrap.Modal(document.getElementById('keyDisplayModal')).show();
+
+                // Reset form and reload keys
+                form.reset();
+                document.getElementById('permRead').checked = true;
+                loadApiKeys();
+            } else {
+                alert('Error creating API key: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error creating API key:', error);
+            alert('Error creating API key: ' + error.message);
+        });
+    }
+
+    function revokeApiKey(keyId, keyName) {
+        if (!confirm(`Are you sure you want to revoke the API key "${keyName}"? This action cannot be undone.`)) {
+            return;
+        }
+
+        fetch(`/api/admin/keys/${keyId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                loadApiKeys();
+            } else {
+                alert('Error revoking API key: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error revoking API key:', error);
+            alert('Error revoking API key: ' + error.message);
+        });
+    }
+
+    function copyApiKey() {
+        const apiKey = document.getElementById('newApiKey').textContent;
+        navigator.clipboard.writeText(apiKey).then(() => {
+            // Show success feedback
+            const button = event.target.closest('button');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+            button.classList.remove('btn-outline-primary');
+            button.classList.add('btn-success');
+
+            setTimeout(() => {
+                button.innerHTML = originalText;
+                button.classList.remove('btn-success');
+                button.classList.add('btn-outline-primary');
+            }, 2000);
+        });
+    }
+</script>
+{% endblock %}

@@ -267,6 +267,62 @@ def get_system_load():
             'error': f"Failed to retrieve system load: {str(e)}"
         }
 
+def get_temperature_info():
+    """Get system temperature information."""
+    try:
+        temperature_info = {
+            'sensors': {},
+            'has_data': False
+        }
+
+        # Try to get temperature sensors
+        if hasattr(psutil, 'sensors_temperatures'):
+            temps = psutil.sensors_temperatures()
+
+            if temps:
+                temperature_info['has_data'] = True
+
+                for sensor_name, sensor_list in temps.items():
+                    sensor_data = []
+                    for sensor in sensor_list:
+                        sensor_entry = {
+                            'label': sensor.label or f"{sensor_name}_sensor",
+                            'current': sensor.current,
+                            'high': sensor.high if sensor.high else None,
+                            'critical': sensor.critical if sensor.critical else None
+                        }
+
+                        # Determine temperature status
+                        if sensor.critical and sensor.current >= sensor.critical:
+                            sensor_entry['status'] = 'critical'
+                            sensor_entry['status_class'] = 'danger'
+                        elif sensor.high and sensor.current >= sensor.high:
+                            sensor_entry['status'] = 'high'
+                            sensor_entry['status_class'] = 'warning'
+                        elif sensor.current >= 70:  # General high temp threshold
+                            sensor_entry['status'] = 'warm'
+                            sensor_entry['status_class'] = 'warning'
+                        else:
+                            sensor_entry['status'] = 'normal'
+                            sensor_entry['status_class'] = 'success'
+
+                        sensor_data.append(sensor_entry)
+
+                    temperature_info['sensors'][sensor_name] = sensor_data
+            else:
+                temperature_info['message'] = "No temperature sensors detected"
+        else:
+            temperature_info['message'] = "Temperature monitoring not supported on this platform"
+
+        return temperature_info
+    except Exception as e:
+        logger.error(f"Error getting temperature info: {str(e)}")
+        return {
+            'error': f"Failed to retrieve temperature information: {str(e)}",
+            'has_data': False,
+            'sensors': {}
+        }
+
 def get_all_system_metrics():
     """Get all system metrics in a single call."""
     return {
@@ -277,5 +333,6 @@ def get_all_system_metrics():
         'network_info': get_network_info(),
         'uptime_info': get_system_uptime(),
         'load_info': get_system_load(),
+        'temperature_info': get_temperature_info(),
         'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }

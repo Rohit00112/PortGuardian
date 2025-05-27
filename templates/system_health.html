@@ -47,6 +47,18 @@
     .network-card {
         border-left: 4px solid #007bff;
     }
+    .temperature-card {
+        border-left: 4px solid #dc3545;
+    }
+    .temp-gauge {
+        height: 20px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+    }
+    .temp-value {
+        font-size: 1.2em;
+        font-weight: bold;
+    }
 </style>
 {% endblock %}
 
@@ -248,6 +260,80 @@
                         <div class="fw-bold">{{ metrics.memory_info.swap.free_gb }} GB</div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Temperature Monitoring -->
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow metric-card">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-thermometer-half me-2"></i>Temperature Monitoring</h5>
+            </div>
+            <div class="card-body">
+                {% if metrics.temperature_info.error is defined %}
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>{{ metrics.temperature_info.error }}
+                </div>
+                {% elif not metrics.temperature_info.has_data %}
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    {{ metrics.temperature_info.message or "Temperature sensors not available on this system" }}
+                </div>
+                {% else %}
+                <div class="row">
+                    {% for sensor_name, sensor_list in metrics.temperature_info.sensors.items() %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card temperature-card">
+                            <div class="card-header bg-light">
+                                <h6 class="mb-0"><strong>{{ sensor_name.title() }}</strong></h6>
+                            </div>
+                            <div class="card-body">
+                                {% for sensor in sensor_list %}
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <span class="fw-bold">{{ sensor.label }}</span>
+                                        <span class="temp-value text-{{ sensor.status_class }}">
+                                            {{ "%.1f"|format(sensor.current) }}°C
+                                        </span>
+                                    </div>
+
+                                    <!-- Temperature gauge -->
+                                    {% set temp_percent = ((sensor.current / 100) * 100) if sensor.current <= 100 else 100 %}
+                                    <div class="progress temp-gauge">
+                                        <div class="progress-bar bg-{{ sensor.status_class }}"
+                                             role="progressbar"
+                                             style="width: {{ temp_percent }}%">
+                                        </div>
+                                    </div>
+
+                                    <div class="row small text-muted">
+                                        <div class="col-4">
+                                            <strong>Status:</strong>
+                                            <span class="text-{{ sensor.status_class }}">{{ sensor.status.title() }}</span>
+                                        </div>
+                                        {% if sensor.high %}
+                                        <div class="col-4">
+                                            <strong>High:</strong> {{ sensor.high }}°C
+                                        </div>
+                                        {% endif %}
+                                        {% if sensor.critical %}
+                                        <div class="col-4">
+                                            <strong>Critical:</strong> {{ sensor.critical }}°C
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                {% if not loop.last %}<hr>{% endif %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>

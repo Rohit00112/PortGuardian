@@ -12,7 +12,7 @@ This document tracks potential features to implement in the PortGuardian applica
 
 - [x] **System Health Dashboard**
   - [x] Overall system metrics (CPU, RAM, disk usage, network throughput)
-  - [ ] Temperature monitoring for critical components
+  - [x] Temperature monitoring for critical components
   - [x] System uptime and load averages
   - [x] Implementation notes: Used psutil for backend data collection in utils/system_monitor.py
 

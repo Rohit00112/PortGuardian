@@ -1,0 +1,407 @@
+{% extends 'base.html' %}
+
+{% block title %}Security Dashboard - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .threat-card {
+        transition: all 0.3s ease;
+        margin-bottom: 15px;
+        border-left: 4px solid;
+    }
+    .threat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .threat-level-critical {
+        border-left-color: #dc3545;
+        background-color: #f8d7da;
+    }
+    .threat-level-high {
+        border-left-color: #fd7e14;
+        background-color: #fff3cd;
+    }
+    .threat-level-medium {
+        border-left-color: #ffc107;
+        background-color: #fff3cd;
+    }
+    .threat-level-low {
+        border-left-color: #28a745;
+        background-color: #d4edda;
+    }
+    .stats-card {
+        text-align: center;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .stats-number {
+        font-size: 2.5em;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    .stats-label {
+        font-size: 0.9em;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .threat-type-badge {
+        font-size: 0.8em;
+        padding: 4px 8px;
+        border-radius: 12px;
+    }
+    .monitoring-status {
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    .monitoring-active {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+    }
+    .monitoring-inactive {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+    }
+    .threat-details {
+        font-size: 0.9em;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    .ip-address {
+        font-family: 'Courier New', monospace;
+        background-color: #f8f9fa;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.9em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Security Dashboard</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-shield-alt me-2"></i>Security Monitoring Dashboard</h4>
+                <div>
+                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monitoring Status -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div id="monitoringStatus" class="monitoring-status monitoring-active">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-eye me-2"></i>
+                    <strong>Security Monitoring: ACTIVE</strong>
+                    <span class="ms-2">Real-time threat detection is running</span>
+                </div>
+                <div>
+                    <button id="toggleMonitoring" class="btn btn-sm btn-outline-danger">
+                        <i class="fas fa-stop me-1"></i>Stop Monitoring
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Overview -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stats-card bg-danger text-white">
+            <div class="stats-number">{{ stats.total_threats or 0 }}</div>
+            <div class="stats-label">Total Threats</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-warning text-white">
+            <div class="stats-number">{{ stats.recent_threats or 0 }}</div>
+            <div class="stats-label">Last 24 Hours</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-info text-white">
+            <div class="stats-number">{{ stats.unresolved_threats or 0 }}</div>
+            <div class="stats-label">Unresolved</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-secondary text-white">
+            <div class="stats-number">{{ stats.top_sources|length or 0 }}</div>
+            <div class="stats-label">Unique Sources</div>
+        </div>
+    </div>
+</div>
+
+<!-- Threat Types Distribution -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Threat Types</h5>
+            </div>
+            <div class="card-body">
+                {% if stats.threat_types %}
+                {% for threat_type, count in stats.threat_types.items() %}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="threat-type-badge bg-primary text-white">{{ threat_type.replace('_', ' ').title() }}</span>
+                    <span class="badge bg-secondary">{{ count }}</span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-center text-muted py-3">
+                    <i class="fas fa-shield-alt"></i><br>
+                    No threats detected yet
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card shadow">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Top Source IPs</h5>
+            </div>
+            <div class="card-body">
+                {% if stats.top_sources %}
+                {% for ip, count in stats.top_sources.items() %}
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="ip-address">{{ ip }}</span>
+                    <span class="badge bg-danger">{{ count }} threats</span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-center text-muted py-3">
+                    <i class="fas fa-globe"></i><br>
+                    No threat sources identified
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Threats -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-exclamation-circle me-2"></i>Recent Threats (Last 24 Hours)</h5>
+            </div>
+            <div class="card-body">
+                {% if threats %}
+                <div class="row">
+                    {% for threat in threats %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card threat-card threat-level-{{ threat.threat_level }}">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <h6 class="card-title mb-1">
+                                            <span class="threat-type-badge bg-{{ 'danger' if threat.threat_level == 'critical' else 'warning' if threat.threat_level == 'high' else 'info' if threat.threat_level == 'medium' else 'success' }} text-white">
+                                                {{ threat.threat_type.replace('_', ' ').title() }}
+                                            </span>
+                                        </h6>
+                                        <div class="ip-address">{{ threat.source_ip }}</div>
+                                    </div>
+                                    <div class="text-end">
+                                        <small class="text-muted">{{ threat.timestamp[:19] }}</small>
+                                        {% if not threat.is_resolved %}
+                                        <br>
+                                        <button class="btn btn-sm btn-outline-success mt-1" onclick="resolveThreat({{ threat.id }})">
+                                            <i class="fas fa-check me-1"></i>Resolve
+                                        </button>
+                                        {% else %}
+                                        <br>
+                                        <span class="badge bg-success mt-1">Resolved</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <p class="card-text mb-1">{{ threat.description }}</p>
+
+                                {% if threat.details %}
+                                <div class="threat-details">
+                                    <i class="fas fa-info-circle me-1"></i>{{ threat.details }}
+                                </div>
+                                {% endif %}
+
+                                {% if threat.port_count or threat.connection_count %}
+                                <div class="threat-details mt-2">
+                                    {% if threat.port_count %}
+                                    <span class="me-3"><i class="fas fa-network-wired me-1"></i>{{ threat.port_count }} ports</span>
+                                    {% endif %}
+                                    {% if threat.connection_count %}
+                                    <span class="me-3"><i class="fas fa-link me-1"></i>{{ threat.connection_count }} connections</span>
+                                    {% endif %}
+                                    {% if threat.time_window %}
+                                    <span><i class="fas fa-clock me-1"></i>{{ threat.time_window }}s window</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-shield-alt fa-3x mb-3"></i>
+                    <h5>No Threats Detected</h5>
+                    <p>Your system appears to be secure. Security monitoring is actively watching for suspicious activities.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let monitoringActive = true;
+
+$(document).ready(function() {
+    // Handle refresh button
+    $('#refreshBtn').click(function() {
+        location.reload();
+    });
+
+    // Handle monitoring toggle
+    $('#toggleMonitoring').click(function() {
+        toggleMonitoring();
+    });
+
+    // Auto-refresh every 30 seconds
+    setInterval(function() {
+        refreshThreats();
+    }, 30000);
+});
+
+function toggleMonitoring() {
+    const endpoint = monitoringActive ? '/api/security/monitoring/stop' : '/api/security/monitoring/start';
+
+    fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            monitoringActive = !monitoringActive;
+            updateMonitoringStatus();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error toggling monitoring');
+    });
+}
+
+function updateMonitoringStatus() {
+    const statusDiv = document.getElementById('monitoringStatus');
+    const toggleBtn = document.getElementById('toggleMonitoring');
+
+    if (monitoringActive) {
+        statusDiv.className = 'monitoring-status monitoring-active';
+        statusDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-eye me-2"></i>
+                    <strong>Security Monitoring: ACTIVE</strong>
+                    <span class="ms-2">Real-time threat detection is running</span>
+                </div>
+                <div>
+                    <button id="toggleMonitoring" class="btn btn-sm btn-outline-danger" onclick="toggleMonitoring()">
+                        <i class="fas fa-stop me-1"></i>Stop Monitoring
+                    </button>
+                </div>
+            </div>
+        `;
+    } else {
+        statusDiv.className = 'monitoring-status monitoring-inactive';
+        statusDiv.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <i class="fas fa-eye-slash me-2"></i>
+                    <strong>Security Monitoring: INACTIVE</strong>
+                    <span class="ms-2">Threat detection is stopped</span>
+                </div>
+                <div>
+                    <button id="toggleMonitoring" class="btn btn-sm btn-outline-success" onclick="toggleMonitoring()">
+                        <i class="fas fa-play me-1"></i>Start Monitoring
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+function resolveThreat(threatId) {
+    if (confirm('Mark this threat as resolved?')) {
+        fetch(`/api/security/threats/${threatId}/resolve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error resolving threat');
+        });
+    }
+}
+
+function refreshThreats() {
+    fetch('/api/security/threats?hours=24&limit=50')
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Update threat count in stats
+            const threatCount = data.data.length;
+            // You could update the UI here without full page reload
+            console.log(`Updated: ${threatCount} threats found`);
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing threats:', error);
+    });
+}
+</script>
+{% endblock %}

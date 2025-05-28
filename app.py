@@ -16,6 +16,7 @@ from utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from utils.audit_decorators import audit_action, audit_login_attempt, audit_logout, audit_process_kill
 from utils.system_monitor import get_all_system_metrics
 from utils.process_groups import process_group_manager
+from utils.security_monitor import security_monitor
 
 # Configure logging
 logging.basicConfig(
@@ -743,12 +744,122 @@ def api_create_predefined_group():
         logger.error(f"Error creating predefined group: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/security-dashboard')
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="security", action="view_security_dashboard")
+def security_dashboard():
+    """Security monitoring dashboard."""
+    try:
+        threats = security_monitor.get_recent_threats(hours=24, limit=50)
+        stats = security_monitor.get_threat_statistics()
+        return render_template('security_dashboard.html', threats=threats, stats=stats)
+    except Exception as e:
+        logger.error(f"Error in security dashboard route: {str(e)}")
+        flash(f"Error retrieving security data: {str(e)}", 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/api/security/threats')
+@login_required
+def api_security_threats():
+    """API endpoint to get recent threats."""
+    try:
+        hours = int(request.args.get('hours', 24))
+        limit = int(request.args.get('limit', 100))
+        threats = security_monitor.get_recent_threats(hours=hours, limit=limit)
+        return jsonify({'status': 'success', 'data': threats})
+    except Exception as e:
+        logger.error(f"Error in security threats API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/security/statistics')
+@login_required
+def api_security_statistics():
+    """API endpoint to get security statistics."""
+    try:
+        stats = security_monitor.get_threat_statistics()
+        return jsonify({'status': 'success', 'data': stats})
+    except Exception as e:
+        logger.error(f"Error in security statistics API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/security/threats/<int:threat_id>/resolve', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.MEDIUM, resource="security", action="resolve_threat")
+def api_resolve_threat(threat_id):
+    """API endpoint to resolve a threat."""
+    try:
+        success = security_monitor.resolve_threat(threat_id, current_user.username)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Threat {threat_id} marked as resolved'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to resolve threat {threat_id}'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error resolving threat: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/security/connections')
+@login_required
+def api_security_connections():
+    """API endpoint to get recent connection logs."""
+    try:
+        hours = int(request.args.get('hours', 1))
+        limit = int(request.args.get('limit', 1000))
+        connections = security_monitor.get_connection_logs(hours=hours, limit=limit)
+        return jsonify({'status': 'success', 'data': connections})
+    except Exception as e:
+        logger.error(f"Error in security connections API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/security/monitoring/start', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.HIGH, resource="security", action="start_monitoring")
+def api_start_security_monitoring():
+    """API endpoint to start security monitoring."""
+    try:
+        security_monitor.start_monitoring()
+        return jsonify({
+            'status': 'success',
+            'message': 'Security monitoring started'
+        })
+    except Exception as e:
+        logger.error(f"Error starting security monitoring: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/security/monitoring/stop', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.HIGH, resource="security", action="stop_monitoring")
+def api_stop_security_monitoring():
+    """API endpoint to stop security monitoring."""
+    try:
+        security_monitor.stop_monitoring()
+        return jsonify({
+            'status': 'success',
+            'message': 'Security monitoring stopped'
+        })
+    except Exception as e:
+        logger.error(f"Error stopping security monitoring: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 if __name__ == '__main__':
     # Start the metrics collector
     metrics_collector.start()
+
+    # Start the security monitor
+    security_monitor.start_monitoring()
 
     try:
         app.run(debug=True, host='0.0.0.0', port=5001)
     finally:
         # Stop the metrics collector when the app shuts down
         metrics_collector.stop()
+
+        # Stop the security monitor when the app shuts down
+        security_monitor.stop_monitoring()

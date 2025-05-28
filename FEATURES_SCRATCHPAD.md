@@ -56,11 +56,11 @@ This document tracks potential features to implement in the PortGuardian applica
   - [ ] Auto-kill processes exceeding resource thresholds
   - [ ] Implementation notes: Will require elevated privileges
 
-- [ ] **Process Grouping**
-  - [ ] Group related processes together
-  - [ ] Manage services as units
-  - [ ] Batch operations on process groups
-  - [ ] Implementation notes: Create a process group model in the database
+- [x] **Process Grouping**
+  - [x] Group related processes together
+  - [x] Manage services as units
+  - [x] Batch operations on process groups
+  - [x] Implementation notes: Created process group model with SQLite database, pattern-based rules, and manual process assignment
 
 ## User Experience Improvements
 

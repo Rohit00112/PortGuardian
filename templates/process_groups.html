@@ -1,0 +1,500 @@
+{% extends 'base.html' %}
+
+{% block title %}Process Groups - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .group-card {
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+        border-left: 4px solid;
+    }
+    .group-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .group-header {
+        display: flex;
+        justify-content: between;
+        align-items: center;
+    }
+    .group-color-indicator {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 10px;
+    }
+    .process-badge {
+        font-size: 0.8em;
+        padding: 4px 8px;
+    }
+    .rule-badge {
+        font-size: 0.7em;
+        margin: 2px;
+    }
+    .predefined-group-card {
+        border: 2px dashed #dee2e6;
+        background-color: #f8f9fa;
+    }
+    .predefined-group-card:hover {
+        border-color: #007bff;
+        background-color: #e3f2fd;
+    }
+    .btn-group-action {
+        margin: 2px;
+    }
+    .process-list {
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    .process-item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .process-item:last-child {
+        border-bottom: none;
+    }
+    .matched-by-rule {
+        background-color: #e8f5e8;
+    }
+    .matched-by-manual {
+        background-color: #fff3cd;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Process Groups</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-layer-group me-2"></i>Process Groups Management</h4>
+                <div>
+                    <button class="btn btn-light btn-sm me-2" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+                        <i class="fas fa-plus me-1"></i>Create Group
+                    </button>
+                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Existing Groups -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h5><i class="fas fa-folder me-2"></i>Your Process Groups</h5>
+        {% if groups %}
+        <div class="row">
+            {% for group in groups %}
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card group-card" style="border-left-color: {{ group.color }};">
+                    <div class="card-header">
+                        <div class="group-header">
+                            <div>
+                                <span class="group-color-indicator" style="background-color: {{ group.color }};"></span>
+                                <strong>{{ group.name }}</strong>
+                            </div>
+                            <span class="badge bg-secondary process-badge">{{ group.process_count }} processes</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-2">{{ group.description or "No description" }}</p>
+
+                        <!-- Rules -->
+                        <div class="mb-2">
+                            <small class="text-muted">Rules:</small><br>
+                            {% for rule in group.rules %}
+                            <span class="badge bg-info rule-badge">{{ rule.rule_type }}: {{ rule.rule_value }}</span>
+                            {% endfor %}
+                            {% if not group.rules %}
+                            <span class="text-muted small">No automatic rules</span>
+                            {% endif %}
+                        </div>
+
+                        <!-- Process List -->
+                        <div class="process-list">
+                            {% for process in group.processes %}
+                            <div class="process-item {{ 'matched-by-rule' if process.matched_by == 'rule' else 'matched-by-manual' }}">
+                                <div>
+                                    <strong>{{ process.name }}</strong> ({{ process.pid }})
+                                    <br><small class="text-muted">{{ process.username }} | {{ "%.1f"|format(process.cpu_percent) }}% CPU</small>
+                                </div>
+                                <div>
+                                    {% if process.matched_by == 'manual' %}
+                                    <button class="btn btn-sm btn-outline-danger" onclick="removeProcessFromGroup({{ group.id }}, {{ process.pid }})">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                            {% if not group.processes %}
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-inbox"></i><br>
+                                No processes found
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="mt-3 d-flex justify-content-between">
+                            <div>
+                                <button class="btn btn-sm btn-danger btn-group-action" onclick="killGroupProcesses({{ group.id }}, '{{ group.name }}')"
+                                        {{ 'disabled' if not group.processes else '' }}>
+                                    <i class="fas fa-skull-crossbones me-1"></i>Kill All
+                                </button>
+                            </div>
+                            <div>
+                                <button class="btn btn-sm btn-outline-secondary btn-group-action" onclick="addProcessToGroup({{ group.id }})">
+                                    <i class="fas fa-plus me-1"></i>Add Process
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger btn-group-action" onclick="deleteGroup({{ group.id }}, '{{ group.name }}')">
+                                    <i class="fas fa-trash me-1"></i>Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer small text-muted">
+                        Created by {{ group.created_by }} on {{ group.created_at[:10] }}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle me-2"></i>
+            No process groups created yet. Create your first group or use a predefined template below.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Predefined Groups -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h5><i class="fas fa-magic me-2"></i>Quick Start Templates</h5>
+        <div class="row">
+            {% for predefined in predefined %}
+            <div class="col-md-6 col-lg-3 mb-3">
+                <div class="card predefined-group-card h-100">
+                    <div class="card-body text-center">
+                        <div class="group-color-indicator mx-auto mb-2" style="background-color: {{ predefined.color }};"></div>
+                        <h6 class="card-title">{{ predefined.name }}</h6>
+                        <p class="card-text small text-muted">{{ predefined.description }}</p>
+                        <button class="btn btn-sm btn-primary" onclick="createPredefinedGroup('{{ predefined.name }}')">
+                            <i class="fas fa-plus me-1"></i>Create
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Create Group Modal -->
+<div class="modal fade" id="createGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Process Group</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createGroupForm">
+                    <div class="mb-3">
+                        <label for="groupName" class="form-label">Group Name *</label>
+                        <input type="text" class="form-control" id="groupName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="groupDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="groupDescription" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="groupColor" class="form-label">Color</label>
+                        <input type="color" class="form-control form-control-color" id="groupColor" value="#007bff">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Rules (Optional)</label>
+                        <div id="rulesContainer">
+                            <!-- Rules will be added dynamically -->
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addRule()">
+                            <i class="fas fa-plus me-1"></i>Add Rule
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="createGroup()">Create Group</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Process Modal -->
+<div class="modal fade" id="addProcessModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Process to Group</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="processPid" class="form-label">Process PID *</label>
+                    <input type="number" class="form-control" id="processPid" required>
+                    <div class="form-text">Enter the Process ID (PID) of the process you want to add to this group.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmAddProcess()">Add Process</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentGroupId = null;
+
+$(document).ready(function() {
+    // Handle refresh button
+    $('#refreshBtn').click(function() {
+        location.reload();
+    });
+});
+
+function addRule() {
+    const container = document.getElementById('rulesContainer');
+    const ruleDiv = document.createElement('div');
+    ruleDiv.className = 'row mb-2 rule-row';
+    ruleDiv.innerHTML = `
+        <div class="col-md-4">
+            <select class="form-select rule-type">
+                <option value="name_pattern">Name Pattern</option>
+                <option value="command_pattern">Command Pattern</option>
+                <option value="user">User</option>
+            </select>
+        </div>
+        <div class="col-md-6">
+            <input type="text" class="form-control rule-value" placeholder="Enter rule value">
+        </div>
+        <div class="col-md-2">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRule(this)">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    container.appendChild(ruleDiv);
+}
+
+function removeRule(button) {
+    button.closest('.rule-row').remove();
+}
+
+function createGroup() {
+    const name = document.getElementById('groupName').value;
+    const description = document.getElementById('groupDescription').value;
+    const color = document.getElementById('groupColor').value;
+
+    if (!name.trim()) {
+        alert('Group name is required');
+        return;
+    }
+
+    // Collect rules
+    const rules = [];
+    document.querySelectorAll('.rule-row').forEach(row => {
+        const type = row.querySelector('.rule-type').value;
+        const value = row.querySelector('.rule-value').value;
+        if (value.trim()) {
+            rules.push({ type, value });
+        }
+    });
+
+    const data = {
+        name: name.trim(),
+        description: description.trim(),
+        color: color,
+        rules: rules
+    };
+
+    fetch('/api/process-groups', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            $('#createGroupModal').modal('hide');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error creating group');
+    });
+}
+
+function createPredefinedGroup(name) {
+    if (confirm(`Create the "${name}" process group?`)) {
+        fetch('/api/process-groups/predefined', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: name })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error creating predefined group');
+        });
+    }
+}
+
+function killGroupProcesses(groupId, groupName) {
+    if (confirm(`Are you sure you want to kill ALL processes in the "${groupName}" group? This action cannot be undone.`)) {
+        fetch(`/api/process-groups/${groupId}/kill`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error killing group processes');
+        });
+    }
+}
+
+function deleteGroup(groupId, groupName) {
+    if (confirm(`Are you sure you want to delete the "${groupName}" group? This will not affect the processes themselves.`)) {
+        fetch(`/api/process-groups/${groupId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting group');
+        });
+    }
+}
+
+function addProcessToGroup(groupId) {
+    currentGroupId = groupId;
+    $('#addProcessModal').modal('show');
+}
+
+function confirmAddProcess() {
+    const pid = document.getElementById('processPid').value;
+
+    if (!pid || isNaN(pid)) {
+        alert('Please enter a valid Process ID (PID)');
+        return;
+    }
+
+    fetch(`/api/process-groups/${currentGroupId}/processes/${pid}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            $('#addProcessModal').modal('hide');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error adding process to group');
+    });
+}
+
+function removeProcessFromGroup(groupId, pid) {
+    if (confirm(`Remove process ${pid} from this group?`)) {
+        fetch(`/api/process-groups/${groupId}/processes/${pid}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error removing process from group');
+        });
+    }
+}
+
+// Clear form when modal is hidden
+$('#createGroupModal').on('hidden.bs.modal', function () {
+    document.getElementById('createGroupForm').reset();
+    document.getElementById('rulesContainer').innerHTML = '';
+});
+
+$('#addProcessModal').on('hidden.bs.modal', function () {
+    document.getElementById('processPid').value = '';
+    currentGroupId = null;
+});
+</script>
+{% endblock %}

@@ -24,11 +24,11 @@ This document tracks potential features to implement in the PortGuardian applica
 
 ## Security Features
 
-- [ ] **Port Scanning Detection**
-  - [ ] Monitor for port scanning attempts
-  - [ ] Log and alert on suspicious connection patterns
-  - [ ] Implement basic intrusion detection
-  - [ ] Implementation notes: Track connection frequency and patterns
+- [x] **Port Scanning Detection**
+  - [x] Monitor for port scanning attempts
+  - [x] Log and alert on suspicious connection patterns
+  - [x] Implement basic intrusion detection
+  - [x] Implementation notes: Real-time connection monitoring with pattern analysis, threat classification, and security dashboard
 
 - [ ] **Enhanced Authentication**
   - [ ] Two-factor authentication

@@ -15,6 +15,7 @@ from api.endpoints import api_bp
 from utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from utils.audit_decorators import audit_action, audit_login_attempt, audit_logout, audit_process_kill
 from utils.system_monitor import get_all_system_metrics
+from utils.process_groups import process_group_manager
 
 # Configure logging
 logging.basicConfig(
@@ -547,6 +548,200 @@ def export_data():
         'timestamp': timestamp,
         'ports': ports
     })
+
+@app.route('/process-groups')
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="process_groups", action="view_process_groups")
+def process_groups():
+    """Process groups management page."""
+    try:
+        groups = process_group_manager.get_groups()
+        predefined = process_group_manager.get_predefined_groups()
+        return render_template('process_groups.html', groups=groups, predefined=predefined)
+    except Exception as e:
+        logger.error(f"Error in process groups route: {str(e)}")
+        flash(f"Error retrieving process groups: {str(e)}", 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/api/process-groups')
+@login_required
+def api_process_groups():
+    """API endpoint to get all process groups."""
+    try:
+        groups = process_group_manager.get_groups()
+        return jsonify({'status': 'success', 'data': groups})
+    except Exception as e:
+        logger.error(f"Error in process groups API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_groups", action="create_group")
+def api_create_process_group():
+    """API endpoint to create a new process group."""
+    try:
+        data = request.get_json()
+
+        if not data or 'name' not in data:
+            return jsonify({'status': 'error', 'message': 'Group name is required'}), 400
+
+        group_id = process_group_manager.create_group(
+            name=data['name'],
+            description=data.get('description', ''),
+            color=data.get('color', '#007bff'),
+            created_by=current_user.username
+        )
+
+        # Add rules if provided
+        if 'rules' in data:
+            for rule in data['rules']:
+                process_group_manager.add_rule(group_id, rule['type'], rule['value'])
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Process group "{data["name"]}" created successfully',
+            'group_id': group_id
+        }), 201
+
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error creating process group: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups/<int:group_id>/kill', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.PROCESS_KILL, AuditSeverity.HIGH, resource="process_groups", action="kill_group_processes")
+def api_kill_group_processes(group_id):
+    """API endpoint to kill all processes in a group."""
+    try:
+        result = process_group_manager.kill_group_processes(group_id, current_user.username)
+
+        # Audit the group kill operation
+        audit_logger.log_event(
+            event_type=AuditEventType.PROCESS_KILL,
+            severity=AuditSeverity.HIGH,
+            user_id=str(current_user.id),
+            username=current_user.username,
+            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
+            user_agent=request.headers.get('User-Agent', ''),
+            resource='process_group',
+            action='kill_group_processes',
+            details={
+                'group_id': group_id,
+                'total_processes': result['total'],
+                'successful_kills': result['successful'],
+                'failed_kills': result['failed']
+            },
+            success=result['failed'] == 0
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f"Group operation completed: {result['successful']} processes killed, {result['failed']} failed",
+            'data': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error killing group processes: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups/<int:group_id>', methods=['DELETE'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_groups", action="delete_group")
+def api_delete_process_group(group_id):
+    """API endpoint to delete a process group."""
+    try:
+        success = process_group_manager.delete_group(group_id)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Process group {group_id} deleted successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to delete process group {group_id}'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error deleting process group: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups/<int:group_id>/processes/<int:pid>', methods=['POST'])
+@login_required
+def api_add_process_to_group(group_id, pid):
+    """API endpoint to manually add a process to a group."""
+    try:
+        success = process_group_manager.add_manual_process(group_id, pid, current_user.username)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Process {pid} added to group {group_id}'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to add process {pid} to group {group_id}'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error adding process to group: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups/<int:group_id>/processes/<int:pid>', methods=['DELETE'])
+@login_required
+def api_remove_process_from_group(group_id, pid):
+    """API endpoint to remove a manually added process from a group."""
+    try:
+        success = process_group_manager.remove_manual_process(group_id, pid)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Process {pid} removed from group {group_id}'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to remove process {pid} from group {group_id}'
+            }), 500
+
+    except Exception as e:
+        logger.error(f"Error removing process from group: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process-groups/predefined', methods=['POST'])
+@login_required
+def api_create_predefined_group():
+    """API endpoint to create a predefined process group."""
+    try:
+        data = request.get_json()
+
+        if not data or 'name' not in data:
+            return jsonify({'status': 'error', 'message': 'Predefined group name is required'}), 400
+
+        predefined_groups = process_group_manager.get_predefined_groups()
+        selected_group = next((g for g in predefined_groups if g['name'] == data['name']), None)
+
+        if not selected_group:
+            return jsonify({'status': 'error', 'message': 'Predefined group not found'}), 404
+
+        group_id = process_group_manager.create_predefined_group(selected_group, current_user.username)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Predefined group "{selected_group["name"]}" created successfully',
+            'group_id': group_id
+        }), 201
+
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error creating predefined group: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     # Start the metrics collector

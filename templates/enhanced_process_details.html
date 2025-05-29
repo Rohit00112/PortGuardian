@@ -1,0 +1,692 @@
+{% extends 'base.html' %}
+
+{% block title %}Process {{ pid }} Details - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .process-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .metric-card {
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+        border-left: 4px solid #007bff;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .metric-value {
+        font-size: 2em;
+        font-weight: bold;
+        color: #007bff;
+    }
+    .metric-label {
+        font-size: 0.9em;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .trend-up {
+        color: #dc3545;
+    }
+    .trend-down {
+        color: #28a745;
+    }
+    .process-status {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.8em;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+    .status-running {
+        background-color: #d4edda;
+        color: #155724;
+    }
+    .status-sleeping {
+        background-color: #cce5ff;
+        color: #004085;
+    }
+    .status-stopped {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    .connection-item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+    .connection-item:last-child {
+        border-bottom: none;
+    }
+    .file-item {
+        padding: 4px 8px;
+        border-bottom: 1px solid #f0f0f0;
+        font-family: 'Courier New', monospace;
+        font-size: 0.85em;
+    }
+    .event-item {
+        padding: 10px;
+        border-left: 3px solid #007bff;
+        margin-bottom: 10px;
+        background-color: #f8f9fa;
+    }
+    .event-timestamp {
+        font-size: 0.8em;
+        color: #6c757d;
+    }
+    .chart-container {
+        height: 300px;
+        margin: 20px 0;
+    }
+    .uptime-badge {
+        background: linear-gradient(45deg, #28a745, #20c997);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('processes') }}">Processes</a></li>
+                <li class="breadcrumb-item active">PID {{ pid }}</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- Process Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="process-header">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h2 class="mb-1">
+                        <i class="fas fa-microchip me-2"></i>{{ process.name }}
+                        <span class="process-status status-{{ process.status.lower() }}">{{ process.status }}</span>
+                    </h2>
+                    <p class="mb-1"><strong>PID:</strong> {{ process.pid }} | <strong>User:</strong> {{ process.username }}</p>
+                    <p class="mb-0"><small>{{ process.command[:100] }}{% if process.command|length > 100 %}...{% endif %}</small></p>
+                </div>
+                <div class="col-md-4 text-end">
+                    {% if process.uptime %}
+                    <div class="uptime-badge">
+                        <i class="fas fa-clock me-1"></i>{{ process.uptime.formatted }}
+                    </div>
+                    {% endif %}
+                    <div class="mt-2">
+                        <button class="btn btn-light btn-sm me-2" onclick="refreshData()">
+                            <i class="fas fa-sync-alt me-1"></i>Refresh
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="killProcess({{ process.pid }})">
+                            <i class="fas fa-skull-crossbones me-1"></i>Kill Process
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Performance Metrics -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body text-center">
+                <div class="metric-value">{{ "%.1f"|format(process.cpu_percent) }}%</div>
+                <div class="metric-label">CPU Usage</div>
+                {% if process.performance_metrics.cpu_trend %}
+                <small class="trend-{{ 'up' if process.performance_metrics.cpu_trend == 'increasing' else 'down' }}">
+                    <i class="fas fa-arrow-{{ 'up' if process.performance_metrics.cpu_trend == 'increasing' else 'down' }}"></i>
+                    {{ process.performance_metrics.cpu_trend }}
+                </small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body text-center">
+                <div class="metric-value">{{ "%.1f"|format(process.memory_percent) }}%</div>
+                <div class="metric-label">Memory Usage</div>
+                {% if process.performance_metrics.memory_trend %}
+                <small class="trend-{{ 'up' if process.performance_metrics.memory_trend == 'increasing' else 'down' }}">
+                    <i class="fas fa-arrow-{{ 'up' if process.performance_metrics.memory_trend == 'increasing' else 'down' }}"></i>
+                    {{ process.performance_metrics.memory_trend }}
+                </small>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body text-center">
+                <div class="metric-value">{{ process.num_threads or 0 }}</div>
+                <div class="metric-label">Threads</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card metric-card">
+            <div class="card-body text-center">
+                <div class="metric-value">{{ process.num_fds or 0 }}</div>
+                <div class="metric-label">File Descriptors</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Resource Trends Chart -->
+{% if process.resource_trends.hourly_trends %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i>Resource Usage Trends (24 Hours)</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="trendsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Process Information Tabs -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" id="processInfoTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="details-tab" data-bs-toggle="tab" data-bs-target="#details" type="button" role="tab">
+                            <i class="fas fa-info-circle me-1"></i>Details
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="memory-tab" data-bs-toggle="tab" data-bs-target="#memory" type="button" role="tab">
+                            <i class="fas fa-memory me-1"></i>Memory
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="connections-tab" data-bs-toggle="tab" data-bs-target="#connections" type="button" role="tab">
+                            <i class="fas fa-network-wired me-1"></i>Connections
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="files-tab" data-bs-toggle="tab" data-bs-target="#files" type="button" role="tab">
+                            <i class="fas fa-file me-1"></i>Open Files
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="events-tab" data-bs-toggle="tab" data-bs-target="#events" type="button" role="tab">
+                            <i class="fas fa-history me-1"></i>Events
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content" id="processInfoTabsContent">
+                    <!-- Details Tab -->
+                    <div class="tab-pane fade show active" id="details" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-cog me-2"></i>Process Information</h6>
+                                <table class="table table-sm">
+                                    <tr><td><strong>PID:</strong></td><td>{{ process.pid }}</td></tr>
+                                    <tr><td><strong>Name:</strong></td><td>{{ process.name }}</td></tr>
+                                    <tr><td><strong>Status:</strong></td><td>{{ process.status }}</td></tr>
+                                    <tr><td><strong>User:</strong></td><td>{{ process.username }}</td></tr>
+                                    <tr><td><strong>Created:</strong></td><td>{{ process.create_time }}</td></tr>
+                                    <tr><td><strong>Working Dir:</strong></td><td><code>{{ process.cwd }}</code></td></tr>
+                                    <tr><td><strong>Nice:</strong></td><td>{{ process.nice }}</td></tr>
+                                    {% if process.terminal %}
+                                    <tr><td><strong>Terminal:</strong></td><td>{{ process.terminal }}</td></tr>
+                                    {% endif %}
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-sitemap me-2"></i>Process Tree</h6>
+                                {% if process.parent %}
+                                <div class="mb-2">
+                                    <strong>Parent:</strong> 
+                                    <a href="{{ url_for('enhanced_process_details', pid=process.parent.pid) }}" class="btn btn-sm btn-outline-primary">
+                                        {{ process.parent.name }} ({{ process.parent.pid }})
+                                    </a>
+                                </div>
+                                {% endif %}
+                                
+                                {% if process.children %}
+                                <div>
+                                    <strong>Children:</strong>
+                                    <div class="mt-2">
+                                        {% for child in process.children %}
+                                        <a href="{{ url_for('enhanced_process_details', pid=child.pid) }}" class="btn btn-sm btn-outline-secondary me-1 mb-1">
+                                            {{ child.name }} ({{ child.pid }})
+                                        </a>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endif %}
+                                
+                                {% if not process.parent and not process.children %}
+                                <p class="text-muted">No parent or child processes</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <h6><i class="fas fa-terminal me-2"></i>Command Line</h6>
+                        <div class="bg-dark text-light p-3 rounded">
+                            <code>{{ process.command }}</code>
+                        </div>
+                    </div>
+                    
+                    <!-- Memory Tab -->
+                    <div class="tab-pane fade" id="memory" role="tabpanel">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-memory me-2"></i>Memory Usage</h6>
+                                <table class="table table-sm">
+                                    <tr><td><strong>Memory %:</strong></td><td>{{ "%.2f"|format(process.memory_percent) }}%</td></tr>
+                                    {% if process.memory_info %}
+                                    <tr><td><strong>RSS:</strong></td><td>{{ "%.2f"|format(process.memory_info.rss / 1024 / 1024) }} MB</td></tr>
+                                    <tr><td><strong>VMS:</strong></td><td>{{ "%.2f"|format(process.memory_info.vms / 1024 / 1024) }} MB</td></tr>
+                                    {% endif %}
+                                    {% if process.memory_full_info %}
+                                    {% for key, value in process.memory_full_info.items() %}
+                                    <tr><td><strong>{{ key.title() }}:</strong></td><td>{{ "%.2f"|format(value / 1024 / 1024) }} MB</td></tr>
+                                    {% endfor %}
+                                    {% endif %}
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-chart-bar me-2"></i>Performance Metrics</h6>
+                                {% if process.performance_metrics %}
+                                <table class="table table-sm">
+                                    {% if process.performance_metrics.memory_avg %}
+                                    <tr><td><strong>Avg Memory:</strong></td><td>{{ "%.2f"|format(process.performance_metrics.memory_avg) }}%</td></tr>
+                                    <tr><td><strong>Max Memory:</strong></td><td>{{ "%.2f"|format(process.performance_metrics.memory_max) }}%</td></tr>
+                                    <tr><td><strong>Min Memory:</strong></td><td>{{ "%.2f"|format(process.performance_metrics.memory_min) }}%</td></tr>
+                                    {% endif %}
+                                    {% if process.performance_metrics.rss_avg %}
+                                    <tr><td><strong>Avg RSS:</strong></td><td>{{ "%.2f"|format(process.performance_metrics.rss_avg / 1024 / 1024) }} MB</td></tr>
+                                    <tr><td><strong>Max RSS:</strong></td><td>{{ "%.2f"|format(process.performance_metrics.rss_max / 1024 / 1024) }} MB</td></tr>
+                                    {% endif %}
+                                </table>
+                                {% else %}
+                                <p class="text-muted">No historical performance data available</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Connections Tab -->
+                    <div class="tab-pane fade" id="connections" role="tabpanel">
+                        <h6><i class="fas fa-network-wired me-2"></i>Network Connections</h6>
+                        {% if process.connections %}
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Local Address</th>
+                                        <th>Remote Address</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for conn in process.connections %}
+                                    <tr>
+                                        <td><span class="badge bg-info">{{ conn.type }}</span></td>
+                                        <td><code>{{ conn.local_address }}</code></td>
+                                        <td><code>{{ conn.remote_address }}</code></td>
+                                        <td><span class="badge bg-success">{{ conn.status }}</span></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-network-wired fa-2x mb-2"></i>
+                            <p>No network connections found</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Open Files Tab -->
+                    <div class="tab-pane fade" id="files" role="tabpanel">
+                        <h6><i class="fas fa-file me-2"></i>Open Files</h6>
+                        {% if process.open_files %}
+                        <div class="mb-3">
+                            <small class="text-muted">Showing {{ process.open_files|length }} of {{ process.open_files_count }} open files</small>
+                        </div>
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            {% for file in process.open_files %}
+                            <div class="file-item">
+                                <div class="d-flex justify-content-between">
+                                    <span><code>{{ file.path }}</code></span>
+                                    <small class="text-muted">FD: {{ file.fd }}</small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-file fa-2x mb-2"></i>
+                            <p>No open files found or access denied</p>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Events Tab -->
+                    <div class="tab-pane fade" id="events" role="tabpanel">
+                        <h6><i class="fas fa-history me-2"></i>Process Events</h6>
+                        {% if process.events %}
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            {% for event in process.events %}
+                            <div class="event-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <strong>{{ event.event_type.replace('_', ' ').title() }}</strong>
+                                        {% if event.details %}
+                                        <div class="mt-1">
+                                            <small class="text-muted">{{ event.details }}</small>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="event-timestamp">{{ event.timestamp[:19] }}</div>
+                                        {% if event.user_id %}
+                                        <small class="text-muted">by {{ event.user_id }}</small>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-history fa-2x mb-2"></i>
+                            <p>No events recorded for this process</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CPU and I/O Information -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-microchip me-2"></i>CPU Information</h5>
+            </div>
+            <div class="card-body">
+                {% if process.cpu_times %}
+                <table class="table table-sm">
+                    <tr><td><strong>User Time:</strong></td><td>{{ "%.2f"|format(process.cpu_times.user) }}s</td></tr>
+                    <tr><td><strong>System Time:</strong></td><td>{{ "%.2f"|format(process.cpu_times.system) }}s</td></tr>
+                    {% if process.cpu_times.children_user %}
+                    <tr><td><strong>Children User:</strong></td><td>{{ "%.2f"|format(process.cpu_times.children_user) }}s</td></tr>
+                    <tr><td><strong>Children System:</strong></td><td>{{ "%.2f"|format(process.cpu_times.children_system) }}s</td></tr>
+                    {% endif %}
+                </table>
+                {% endif %}
+
+                {% if process.cpu_affinity %}
+                <div class="mt-3">
+                    <strong>CPU Affinity:</strong>
+                    <div class="mt-1">
+                        {% for cpu in process.cpu_affinity %}
+                        <span class="badge bg-secondary me-1">CPU {{ cpu }}</span>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if process.performance_metrics.cpu_avg %}
+                <div class="mt-3">
+                    <strong>Performance (Last Hour):</strong>
+                    <ul class="list-unstyled mt-2">
+                        <li>Average: {{ "%.2f"|format(process.performance_metrics.cpu_avg) }}%</li>
+                        <li>Maximum: {{ "%.2f"|format(process.performance_metrics.cpu_max) }}%</li>
+                        <li>Minimum: {{ "%.2f"|format(process.performance_metrics.cpu_min) }}%</li>
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0"><i class="fas fa-hdd me-2"></i>I/O Information</h5>
+            </div>
+            <div class="card-body">
+                {% if process.io_counters %}
+                <table class="table table-sm">
+                    <tr><td><strong>Read Count:</strong></td><td>{{ "{:,}".format(process.io_counters.read_count) }}</td></tr>
+                    <tr><td><strong>Write Count:</strong></td><td>{{ "{:,}".format(process.io_counters.write_count) }}</td></tr>
+                    <tr><td><strong>Read Bytes:</strong></td><td>{{ "%.2f"|format(process.io_counters.read_bytes / 1024 / 1024) }} MB</td></tr>
+                    <tr><td><strong>Write Bytes:</strong></td><td>{{ "%.2f"|format(process.io_counters.write_bytes / 1024 / 1024) }} MB</td></tr>
+                </table>
+                {% else %}
+                <p class="text-muted">I/O information not available</p>
+                {% endif %}
+
+                {% if process.ionice %}
+                <div class="mt-3">
+                    <strong>I/O Priority:</strong>
+                    <div class="mt-1">
+                        <span class="badge bg-info">Class: {{ process.ionice.ioclass }}</span>
+                        <span class="badge bg-secondary">Value: {{ process.ionice.value }}</span>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+let trendsChart = null;
+
+$(document).ready(function() {
+    // Initialize trends chart if data is available
+    {% if process.resource_trends.hourly_trends %}
+    initTrendsChart();
+    {% endif %}
+
+    // Auto-refresh every 30 seconds
+    setInterval(function() {
+        refreshData();
+    }, 30000);
+});
+
+function initTrendsChart() {
+    const ctx = document.getElementById('trendsChart').getContext('2d');
+
+    const trendsData = {{ process.resource_trends.hourly_trends | tojson }};
+
+    const labels = trendsData.map(item => {
+        const date = new Date(item.hour);
+        return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    });
+
+    const cpuData = trendsData.map(item => item.avg_cpu);
+    const memoryData = trendsData.map(item => item.avg_memory);
+
+    trendsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'CPU Usage (%)',
+                data: cpuData,
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                tension: 0.1,
+                yAxisID: 'y'
+            }, {
+                label: 'Memory Usage (%)',
+                data: memoryData,
+                borderColor: 'rgb(54, 162, 235)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                tension: 0.1,
+                yAxisID: 'y'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: {
+                        display: true,
+                        text: 'Time'
+                    }
+                },
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: {
+                        display: true,
+                        text: 'Usage (%)'
+                    },
+                    min: 0,
+                    max: 100
+                }
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Resource Usage Trends - Last 24 Hours'
+                },
+                legend: {
+                    display: true,
+                    position: 'top'
+                }
+            }
+        }
+    });
+}
+
+function refreshData() {
+    fetch(`/api/process/{{ pid }}/enhanced`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Update CPU and memory values
+            updateMetricValue('cpu', data.data.cpu_percent);
+            updateMetricValue('memory', data.data.memory_percent);
+            updateMetricValue('threads', data.data.num_threads);
+            updateMetricValue('fds', data.data.num_fds);
+
+            console.log('Process data refreshed');
+        } else {
+            console.error('Error refreshing data:', data.message);
+            // Process might have been terminated
+            if (data.message.includes('not found')) {
+                showProcessTerminatedAlert();
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing data:', error);
+    });
+}
+
+function updateMetricValue(metric, value) {
+    const elements = document.querySelectorAll(`[data-metric="${metric}"]`);
+    elements.forEach(element => {
+        if (metric === 'cpu' || metric === 'memory') {
+            element.textContent = value.toFixed(1) + '%';
+        } else {
+            element.textContent = value || 0;
+        }
+    });
+}
+
+function showProcessTerminatedAlert() {
+    const alertHtml = `
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Process Terminated:</strong> This process is no longer running. The displayed information is from the last known state.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+
+    const container = document.querySelector('.process-header');
+    container.insertAdjacentHTML('afterend', alertHtml);
+}
+
+function killProcess(pid) {
+    if (confirm(`Are you sure you want to kill process ${pid}? This action cannot be undone.`)) {
+        fetch(`/api/kill/${pid}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`Process ${pid} has been terminated successfully.`);
+                // Redirect to processes page after a short delay
+                setTimeout(() => {
+                    window.location.href = '/processes';
+                }, 2000);
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error killing process');
+        });
+    }
+}
+
+// Add data attributes to metric values for easy updating
+document.addEventListener('DOMContentLoaded', function() {
+    const cpuElements = document.querySelectorAll('.metric-value');
+    if (cpuElements.length >= 4) {
+        cpuElements[0].setAttribute('data-metric', 'cpu');
+        cpuElements[1].setAttribute('data-metric', 'memory');
+        cpuElements[2].setAttribute('data-metric', 'threads');
+        cpuElements[3].setAttribute('data-metric', 'fds');
+    }
+});
+</script>
+{% endblock %}

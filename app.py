@@ -17,6 +17,7 @@ from utils.audit_decorators import audit_action, audit_login_attempt, audit_logo
 from utils.system_monitor import get_all_system_metrics
 from utils.process_groups import process_group_manager
 from utils.security_monitor import security_monitor
+from utils.enhanced_process_manager import enhanced_process_manager
 
 # Configure logging
 logging.basicConfig(
@@ -848,12 +849,81 @@ def api_stop_security_monitoring():
         logger.error(f"Error stopping security monitoring: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/process/<int:pid>/details')
+@login_required
+@audit_action(AuditEventType.PROCESS_VIEW, AuditSeverity.LOW, resource="process", action="view_enhanced_details")
+def enhanced_process_details(pid):
+    """Enhanced process details page with historical data."""
+    try:
+        process_info = enhanced_process_manager.get_enhanced_process_info(pid)
+        if not process_info:
+            flash(f"Process with PID {pid} not found", 'error')
+            return redirect(url_for('processes'))
+
+        return render_template('enhanced_process_details.html', process=process_info, pid=pid)
+    except Exception as e:
+        logger.error(f"Error in enhanced process details route: {str(e)}")
+        flash(f"Error retrieving process details: {str(e)}", 'danger')
+        return redirect(url_for('processes'))
+
+@app.route('/api/process/<int:pid>/enhanced')
+@login_required
+def api_enhanced_process_info(pid):
+    """API endpoint to get enhanced process information."""
+    try:
+        process_info = enhanced_process_manager.get_enhanced_process_info(pid)
+        if not process_info:
+            return jsonify({'status': 'error', 'message': 'Process not found'}), 404
+
+        return jsonify({'status': 'success', 'data': process_info})
+    except Exception as e:
+        logger.error(f"Error in enhanced process API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process/<int:pid>/history')
+@login_required
+def api_process_history(pid):
+    """API endpoint to get process historical data."""
+    try:
+        hours = int(request.args.get('hours', 24))
+        history = enhanced_process_manager._get_process_history(pid, hours)
+        return jsonify({'status': 'success', 'data': history})
+    except Exception as e:
+        logger.error(f"Error in process history API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process/<int:pid>/trends')
+@login_required
+def api_process_trends(pid):
+    """API endpoint to get process resource trends."""
+    try:
+        trends = enhanced_process_manager._get_resource_trends(pid)
+        return jsonify({'status': 'success', 'data': trends})
+    except Exception as e:
+        logger.error(f"Error in process trends API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process/<int:pid>/events')
+@login_required
+def api_process_events(pid):
+    """API endpoint to get process events."""
+    try:
+        limit = int(request.args.get('limit', 50))
+        events = enhanced_process_manager._get_process_events(pid, limit)
+        return jsonify({'status': 'success', 'data': events})
+    except Exception as e:
+        logger.error(f"Error in process events API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 if __name__ == '__main__':
     # Start the metrics collector
     metrics_collector.start()
 
     # Start the security monitor
     security_monitor.start_monitoring()
+
+    # Start the enhanced process manager
+    enhanced_process_manager.start_monitoring()
 
     try:
         app.run(debug=True, host='0.0.0.0', port=5001)
@@ -863,3 +933,6 @@ if __name__ == '__main__':
 
         # Stop the security monitor when the app shuts down
         security_monitor.stop_monitoring()
+
+        # Stop the enhanced process manager when the app shuts down
+        enhanced_process_manager.stop_monitoring()

@@ -73,7 +73,7 @@ netstat -an | grep LISTEN    # Alternative way to show listening ports</code></p
                         <td>{{ port.pid }}</td>
                         <td>
                             {% if port.pid != 'N/A' %}
-                            <a href="{{ url_for('process_detail', pid=port.pid) }}" class="process-link">
+                            <a href="{{ url_for('enhanced_process_details', pid=port.pid) }}" class="process-link">
                                 {{ port.process_name }}
                             </a>
                             {% else %}
@@ -84,7 +84,10 @@ netstat -an | grep LISTEN    # Alternative way to show listening ports</code></p
                         <td>
                             {% if port.pid != 'N/A' %}
                             <div class="btn-group" role="group">
-                                <a href="{{ url_for('process_detail', pid=port.pid) }}" class="btn btn-sm btn-info">
+                                <a href="{{ url_for('enhanced_process_details', pid=port.pid) }}" class="btn btn-sm btn-info" title="Enhanced Details">
+                                    <i class="fas fa-chart-line"></i>
+                                </a>
+                                <a href="{{ url_for('process_detail', pid=port.pid) }}" class="btn btn-sm btn-outline-info" title="Basic Details">
                                     <i class="fas fa-info-circle"></i>
                                 </a>
                                 <button class="btn btn-sm btn-danger kill-process" data-pid="{{ port.pid }}" data-process="{{ port.process_name }}">

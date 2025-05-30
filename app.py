@@ -18,6 +18,7 @@ from utils.system_monitor import get_all_system_metrics
 from utils.process_groups import process_group_manager
 from utils.security_monitor import security_monitor
 from utils.enhanced_process_manager import enhanced_process_manager
+from utils.resource_limiter import resource_limiter
 
 # Configure logging
 logging.basicConfig(
@@ -915,6 +916,181 @@ def api_process_events(pid):
         logger.error(f"Error in process events API: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/resource-limits')
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="resource_limits", action="view_resource_limits")
+def resource_limits():
+    """Resource limits management page."""
+    try:
+        limits = resource_limiter.get_all_limits()
+        violations = resource_limiter.get_violations(hours=24, limit=50)
+        templates = resource_limiter.get_templates()
+        return render_template('resource_limits.html', limits=limits, violations=violations, templates=templates)
+    except Exception as e:
+        logger.error(f"Error in resource limits route: {str(e)}")
+        flash(f"Error retrieving resource limits: {str(e)}", 'danger')
+        return redirect(url_for('index'))
+
+@app.route('/api/resource-limits', methods=['GET'])
+@login_required
+def api_get_resource_limits():
+    """API endpoint to get all resource limits."""
+    try:
+        limits = resource_limiter.get_all_limits()
+        return jsonify({'status': 'success', 'data': limits})
+    except Exception as e:
+        logger.error(f"Error in resource limits API: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resource-limits', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.HIGH, resource="resource_limits", action="set_resource_limit")
+def api_set_resource_limit():
+    """API endpoint to set a resource limit."""
+    try:
+        data = request.get_json()
+
+        required_fields = ['pid', 'limit_type', 'limit_value', 'action']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'status': 'error', 'message': f'Missing required field: {field}'}), 400
+
+        limit_id = resource_limiter.set_resource_limit(
+            pid=int(data['pid']),
+            limit_type=data['limit_type'],
+            limit_value=float(data['limit_value']),
+            action=data['action'],
+            created_by=current_user.username,
+            description=data.get('description', '')
+        )
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Resource limit set successfully',
+            'limit_id': limit_id
+        }), 201
+
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error setting resource limit: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resource-limits/<int:limit_id>', methods=['DELETE'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="resource_limits", action="remove_resource_limit")
+def api_remove_resource_limit(limit_id):
+    """API endpoint to remove a resource limit."""
+    try:
+        success = resource_limiter.remove_resource_limit(limit_id)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Resource limit {limit_id} removed successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to remove resource limit {limit_id}'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error removing resource limit: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/process/<int:pid>/priority', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_priority", action="set_process_priority")
+def api_set_process_priority(pid):
+    """API endpoint to set process priority."""
+    try:
+        data = request.get_json()
+
+        if 'nice_value' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing nice_value'}), 400
+
+        nice_value = int(data['nice_value'])
+        if nice_value < -20 or nice_value > 19:
+            return jsonify({'status': 'error', 'message': 'Nice value must be between -20 and 19'}), 400
+
+        success = resource_limiter.set_process_priority(pid, nice_value, current_user.username)
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Process priority set to {nice_value}'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to set process priority'
+            }), 500
+
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error setting process priority: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resource-limits/templates', methods=['GET'])
+@login_required
+def api_get_templates():
+    """API endpoint to get resource limit templates."""
+    try:
+        templates = resource_limiter.get_templates()
+        return jsonify({'status': 'success', 'data': templates})
+    except Exception as e:
+        logger.error(f"Error getting templates: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resource-limits/templates/<template_name>/apply', methods=['POST'])
+@login_required
+@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="resource_limits", action="apply_template")
+def api_apply_template(template_name):
+    """API endpoint to apply a resource limit template."""
+    try:
+        data = request.get_json()
+
+        if 'pid' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing pid'}), 400
+
+        success = resource_limiter.apply_template(
+            pid=int(data['pid']),
+            template_name=template_name,
+            created_by=current_user.username
+        )
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'message': f'Template "{template_name}" applied successfully'
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': f'Failed to apply template "{template_name}"'
+            }), 500
+
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error applying template: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/resource-limits/violations')
+@login_required
+def api_get_violations():
+    """API endpoint to get resource limit violations."""
+    try:
+        hours = int(request.args.get('hours', 24))
+        limit = int(request.args.get('limit', 100))
+        violations = resource_limiter.get_violations(hours=hours, limit=limit)
+        return jsonify({'status': 'success', 'data': violations})
+    except Exception as e:
+        logger.error(f"Error getting violations: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 if __name__ == '__main__':
     # Start the metrics collector
     metrics_collector.start()
@@ -924,6 +1100,9 @@ if __name__ == '__main__':
 
     # Start the enhanced process manager
     enhanced_process_manager.start_monitoring()
+
+    # Start the resource limiter
+    resource_limiter.start_monitoring()
 
     try:
         app.run(debug=True, host='0.0.0.0', port=5001)
@@ -936,3 +1115,6 @@ if __name__ == '__main__':
 
         # Stop the enhanced process manager when the app shuts down
         enhanced_process_manager.stop_monitoring()
+
+        # Stop the resource limiter when the app shuts down
+        resource_limiter.stop_monitoring()

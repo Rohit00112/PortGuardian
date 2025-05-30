@@ -50,11 +50,12 @@ This document tracks potential features to implement in the PortGuardian applica
   - [ ] Create process dependencies
   - [ ] Implementation notes: Could use APScheduler for Python scheduling
 
-- [ ] **Resource Limiting**
-  - [ ] Set CPU/memory limits for specific processes
-  - [ ] Implement process prioritization
-  - [ ] Auto-kill processes exceeding resource thresholds
-  - [ ] Implementation notes: Will require elevated privileges
+- [x] **Resource Limiting**
+  - [x] Set CPU/memory limits for specific processes
+  - [x] Implement process prioritization (nice values)
+  - [x] Auto-enforcement with configurable actions (warn, throttle, suspend, kill)
+  - [x] Resource limit templates for common process types
+  - [x] Implementation notes: Comprehensive resource management with SQLite backend, real-time monitoring, and violation tracking
 
 - [x] **Process Grouping**
   - [x] Group related processes together

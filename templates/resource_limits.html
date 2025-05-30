@@ -1,0 +1,561 @@
+{% extends 'base.html' %}
+
+{% block title %}Resource Limits - PortGuardian{% endblock %}
+
+{% block extra_css %}
+<style>
+    .limit-card {
+        transition: all 0.3s ease;
+        margin-bottom: 15px;
+        border-left: 4px solid;
+    }
+    .limit-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+    }
+    .limit-type-cpu {
+        border-left-color: #dc3545;
+    }
+    .limit-type-memory {
+        border-left-color: #007bff;
+    }
+    .action-warn {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+    .action-throttle {
+        background-color: #cce5ff;
+        color: #004085;
+    }
+    .action-suspend {
+        background-color: #f8d7da;
+        color: #721c24;
+    }
+    .action-kill {
+        background-color: #d1ecf1;
+        color: #0c5460;
+    }
+    .violation-card {
+        border-left: 4px solid #dc3545;
+        margin-bottom: 10px;
+    }
+    .template-card {
+        border: 2px dashed #dee2e6;
+        background-color: #f8f9fa;
+        transition: all 0.3s ease;
+    }
+    .template-card:hover {
+        border-color: #007bff;
+        background-color: #e3f2fd;
+    }
+    .stats-card {
+        text-align: center;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+    }
+    .stats-number {
+        font-size: 2.5em;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    .stats-label {
+        font-size: 0.9em;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    .limit-value {
+        font-weight: bold;
+        font-size: 1.1em;
+    }
+    .process-info {
+        font-family: 'Courier New', monospace;
+        background-color: #f8f9fa;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-size: 0.9em;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active">Resource Limits</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card shadow">
+            <div class="card-header bg-warning text-white d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-tachometer-alt me-2"></i>Resource Limits Management</h4>
+                <div>
+                    <button class="btn btn-light btn-sm me-2" data-bs-toggle="modal" data-bs-target="#setLimitModal">
+                        <i class="fas fa-plus me-1"></i>Set Limit
+                    </button>
+                    <button id="refreshBtn" class="btn btn-light btn-sm">
+                        <i class="fas fa-sync-alt me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Overview -->
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stats-card bg-primary text-white">
+            <div class="stats-number">{{ limits|length }}</div>
+            <div class="stats-label">Active Limits</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-danger text-white">
+            <div class="stats-number">{{ violations|length }}</div>
+            <div class="stats-label">Recent Violations</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-info text-white">
+            <div class="stats-number">{{ templates|length }}</div>
+            <div class="stats-label">Available Templates</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stats-card bg-success text-white">
+            <div class="stats-number">{{ (limits|selectattr('limit_type', 'equalto', 'cpu_percent')|list|length) }}</div>
+            <div class="stats-label">CPU Limits</div>
+        </div>
+    </div>
+</div>
+
+<!-- Active Resource Limits -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-list me-2"></i>Active Resource Limits</h5>
+            </div>
+            <div class="card-body">
+                {% if limits %}
+                <div class="row">
+                    {% for limit in limits %}
+                    <div class="col-md-6 mb-3">
+                        <div class="card limit-card limit-type-{{ limit.limit_type.split('_')[0] }}">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <h6 class="card-title mb-1">
+                                            <span class="process-info">PID {{ limit.pid }}</span>
+                                            <span class="ms-2">{{ limit.process_name }}</span>
+                                        </h6>
+                                        <div class="mb-2">
+                                            <span class="badge bg-secondary">{{ limit.limit_type.replace('_', ' ').title() }}</span>
+                                            <span class="limit-value text-{{ 'danger' if limit.limit_type.startswith('cpu') else 'primary' }}">
+                                                {{ limit.limit_value }}{% if limit.limit_type.endswith('percent') %}%{% else %} MB{% endif %}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="text-end">
+                                        <small class="text-muted">{{ limit.created_at[:19] }}</small>
+                                        <br>
+                                        <button class="btn btn-sm btn-outline-danger mt-1" onclick="removeLimit({{ limit.id }})">
+                                            <i class="fas fa-trash me-1"></i>Remove
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="badge action-{{ limit.action }} px-3 py-2">
+                                        <i class="fas fa-{{ 'exclamation-triangle' if limit.action == 'warn' else 'clock' if limit.action == 'throttle' else 'pause' if limit.action == 'suspend' else 'skull-crossbones' }} me-1"></i>
+                                        {{ limit.action.title() }}
+                                    </span>
+                                    <small class="text-muted">by {{ limit.created_by }}</small>
+                                </div>
+                                
+                                {% if limit.description %}
+                                <div class="mt-2">
+                                    <small class="text-muted">{{ limit.description }}</small>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-tachometer-alt fa-3x mb-3"></i>
+                    <h5>No Resource Limits Set</h5>
+                    <p>Set resource limits to control process CPU and memory usage.</p>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#setLimitModal">
+                        <i class="fas fa-plus me-1"></i>Set Your First Limit
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Templates -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-magic me-2"></i>Resource Limit Templates</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for template in templates %}
+                    <div class="col-md-6 col-lg-3 mb-3">
+                        <div class="card template-card h-100">
+                            <div class="card-body text-center">
+                                <h6 class="card-title">{{ template.name }}</h6>
+                                <p class="card-text small text-muted">{{ template.description }}</p>
+                                
+                                <div class="mb-3">
+                                    {% for limit_config in template.limits %}
+                                    <div class="small mb-1">
+                                        <span class="badge bg-secondary">{{ limit_config.type.replace('_', ' ').title() }}</span>
+                                        <span class="fw-bold">{{ limit_config.value }}{% if limit_config.type.endswith('percent') %}%{% else %} MB{% endif %}</span>
+                                        <span class="text-muted">({{ limit_config.action }})</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                
+                                <button class="btn btn-sm btn-primary" onclick="showApplyTemplateModal('{{ template.name }}')">
+                                    <i class="fas fa-play me-1"></i>Apply
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Violations -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Recent Violations (Last 24 Hours)</h5>
+            </div>
+            <div class="card-body">
+                {% if violations %}
+                <div style="max-height: 400px; overflow-y: auto;">
+                    {% for violation in violations %}
+                    <div class="card violation-card">
+                        <div class="card-body py-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>PID {{ violation.pid }}</strong> ({{ violation.process_name }})
+                                    <span class="badge bg-warning text-dark ms-2">{{ violation.limit_type.replace('_', ' ').title() }}</span>
+                                </div>
+                                <small class="text-muted">{{ violation.timestamp[:19] }}</small>
+                            </div>
+                            <div class="mt-1">
+                                <small>
+                                    Limit: {{ violation.limit_value }}{% if violation.limit_type.endswith('percent') %}%{% else %} MB{% endif %} | 
+                                    Actual: {{ "%.1f"|format(violation.actual_value) }}{% if violation.limit_type.endswith('percent') %}%{% else %} MB{% endif %} | 
+                                    Action: {{ violation.action_taken }}
+                                    {% if violation.success %}
+                                    <span class="text-success"><i class="fas fa-check"></i></span>
+                                    {% else %}
+                                    <span class="text-danger"><i class="fas fa-times"></i></span>
+                                    {% endif %}
+                                </small>
+                            </div>
+                            {% if violation.details %}
+                            <div class="mt-1">
+                                <small class="text-muted">{{ violation.details }}</small>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    <i class="fas fa-shield-alt fa-2x mb-2"></i>
+                    <p>No violations in the last 24 hours</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Set Limit Modal -->
+<div class="modal fade" id="setLimitModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Set Resource Limit</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="setLimitForm">
+                    <div class="mb-3">
+                        <label for="limitPid" class="form-label">Process PID *</label>
+                        <input type="number" class="form-control" id="limitPid" required>
+                        <div class="form-text">Enter the Process ID to set limits for</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitType" class="form-label">Limit Type *</label>
+                        <select class="form-select" id="limitType" required>
+                            <option value="">Select limit type</option>
+                            <option value="cpu_percent">CPU Percentage</option>
+                            <option value="memory_percent">Memory Percentage</option>
+                            <option value="memory_rss">Memory RSS (MB)</option>
+                            <option value="memory_vms">Memory VMS (MB)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitValue" class="form-label">Limit Value *</label>
+                        <input type="number" class="form-control" id="limitValue" step="0.1" min="0" required>
+                        <div class="form-text" id="limitValueHelp">Enter the maximum allowed value</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitAction" class="form-label">Action *</label>
+                        <select class="form-select" id="limitAction" required>
+                            <option value="">Select action</option>
+                            <option value="warn">Warn - Log warning message</option>
+                            <option value="throttle">Throttle - Reduce process priority</option>
+                            <option value="suspend">Suspend - Pause the process</option>
+                            <option value="kill">Kill - Terminate the process</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="limitDescription" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="setResourceLimit()">Set Limit</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Apply Template Modal -->
+<div class="modal fade" id="applyTemplateModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Apply Template</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="templatePid" class="form-label">Process PID *</label>
+                    <input type="number" class="form-control" id="templatePid" required>
+                    <div class="form-text">Enter the Process ID to apply the template to</div>
+                </div>
+                <div class="alert alert-info">
+                    <strong>Template:</strong> <span id="selectedTemplateName"></span>
+                    <div id="templateLimits" class="mt-2"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyTemplate()">Apply Template</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedTemplate = null;
+
+$(document).ready(function() {
+    // Handle refresh button
+    $('#refreshBtn').click(function() {
+        location.reload();
+    });
+
+    // Update help text based on limit type
+    $('#limitType').change(function() {
+        const limitType = $(this).val();
+        const helpText = $('#limitValueHelp');
+
+        if (limitType.includes('percent')) {
+            helpText.text('Enter percentage (0-100)');
+            $('#limitValue').attr('max', 100);
+        } else if (limitType.includes('memory')) {
+            helpText.text('Enter memory limit in MB');
+            $('#limitValue').removeAttr('max');
+        } else {
+            helpText.text('Enter the maximum allowed value');
+            $('#limitValue').removeAttr('max');
+        }
+    });
+
+    // Auto-refresh every 30 seconds
+    setInterval(function() {
+        refreshViolations();
+    }, 30000);
+});
+
+function setResourceLimit() {
+    const pid = document.getElementById('limitPid').value;
+    const limitType = document.getElementById('limitType').value;
+    const limitValue = document.getElementById('limitValue').value;
+    const action = document.getElementById('limitAction').value;
+    const description = document.getElementById('limitDescription').value;
+
+    if (!pid || !limitType || !limitValue || !action) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    const data = {
+        pid: parseInt(pid),
+        limit_type: limitType,
+        limit_value: parseFloat(limitValue),
+        action: action,
+        description: description
+    };
+
+    fetch('/api/resource-limits', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            $('#setLimitModal').modal('hide');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error setting resource limit');
+    });
+}
+
+function removeLimit(limitId) {
+    if (confirm('Are you sure you want to remove this resource limit?')) {
+        fetch(`/api/resource-limits/${limitId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error removing resource limit');
+        });
+    }
+}
+
+function showApplyTemplateModal(templateName) {
+    selectedTemplate = templateName;
+    document.getElementById('selectedTemplateName').textContent = templateName;
+
+    // Find template details
+    const templates = {{ templates | tojson }};
+    const template = templates.find(t => t.name === templateName);
+
+    if (template) {
+        const limitsHtml = template.limits.map(limit =>
+            `<div class="small">
+                <span class="badge bg-secondary">${limit.type.replace('_', ' ')}</span>
+                <strong>${limit.value}${limit.type.includes('percent') ? '%' : ' MB'}</strong>
+                <span class="text-muted">(${limit.action})</span>
+            </div>`
+        ).join('');
+
+        document.getElementById('templateLimits').innerHTML = limitsHtml;
+    }
+
+    $('#applyTemplateModal').modal('show');
+}
+
+function applyTemplate() {
+    const pid = document.getElementById('templatePid').value;
+
+    if (!pid) {
+        alert('Please enter a Process ID');
+        return;
+    }
+
+    if (!selectedTemplate) {
+        alert('No template selected');
+        return;
+    }
+
+    fetch(`/api/resource-limits/templates/${encodeURIComponent(selectedTemplate)}/apply`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pid: parseInt(pid) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            $('#applyTemplateModal').modal('hide');
+            location.reload();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error applying template');
+    });
+}
+
+function refreshViolations() {
+    fetch('/api/resource-limits/violations?hours=24&limit=50')
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            console.log(`Updated: ${data.data.length} violations found`);
+            // You could update the violations section here without full page reload
+        }
+    })
+    .catch(error => {
+        console.error('Error refreshing violations:', error);
+    });
+}
+
+// Clear forms when modals are hidden
+$('#setLimitModal').on('hidden.bs.modal', function () {
+    document.getElementById('setLimitForm').reset();
+    $('#limitValueHelp').text('Enter the maximum allowed value');
+    $('#limitValue').removeAttr('max');
+});
+
+$('#applyTemplateModal').on('hidden.bs.modal', function () {
+    document.getElementById('templatePid').value = '';
+    selectedTemplate = null;
+});
+</script>
+{% endblock %}

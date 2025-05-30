@@ -131,6 +131,9 @@
                         <button class="btn btn-light btn-sm me-2" onclick="refreshData()">
                             <i class="fas fa-sync-alt me-1"></i>Refresh
                         </button>
+                        <button class="btn btn-warning btn-sm me-2" onclick="showResourceLimitModal()">
+                            <i class="fas fa-tachometer-alt me-1"></i>Set Limits
+                        </button>
                         <button class="btn btn-danger btn-sm" onclick="killProcess({{ process.pid }})">
                             <i class="fas fa-skull-crossbones me-1"></i>Kill Process
                         </button>
@@ -509,6 +512,55 @@
         </div>
     </div>
 </div>
+
+<!-- Resource Limit Modal -->
+<div class="modal fade" id="resourceLimitModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Set Resource Limit for PID {{ pid }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="resourceLimitForm">
+                    <div class="mb-3">
+                        <label for="limitType" class="form-label">Limit Type *</label>
+                        <select class="form-select" id="limitType" required>
+                            <option value="">Select limit type</option>
+                            <option value="cpu_percent">CPU Percentage</option>
+                            <option value="memory_percent">Memory Percentage</option>
+                            <option value="memory_rss">Memory RSS (MB)</option>
+                            <option value="memory_vms">Memory VMS (MB)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitValue" class="form-label">Limit Value *</label>
+                        <input type="number" class="form-control" id="limitValue" step="0.1" min="0" required>
+                        <div class="form-text" id="limitValueHelp">Enter the maximum allowed value</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitAction" class="form-label">Action *</label>
+                        <select class="form-select" id="limitAction" required>
+                            <option value="">Select action</option>
+                            <option value="warn">Warn - Log warning message</option>
+                            <option value="throttle">Throttle - Reduce process priority</option>
+                            <option value="suspend">Suspend - Pause the process</option>
+                            <option value="kill">Kill - Terminate the process</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="limitDescription" class="form-label">Description</label>
+                        <textarea class="form-control" id="limitDescription" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="setResourceLimit()">Set Limit</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -687,6 +739,77 @@ document.addEventListener('DOMContentLoaded', function() {
         cpuElements[2].setAttribute('data-metric', 'threads');
         cpuElements[3].setAttribute('data-metric', 'fds');
     }
+
+    // Update help text based on limit type
+    $('#limitType').change(function() {
+        const limitType = $(this).val();
+        const helpText = $('#limitValueHelp');
+
+        if (limitType.includes('percent')) {
+            helpText.text('Enter percentage (0-100)');
+            $('#limitValue').attr('max', 100);
+        } else if (limitType.includes('memory')) {
+            helpText.text('Enter memory limit in MB');
+            $('#limitValue').removeAttr('max');
+        } else {
+            helpText.text('Enter the maximum allowed value');
+            $('#limitValue').removeAttr('max');
+        }
+    });
+});
+
+function showResourceLimitModal() {
+    $('#resourceLimitModal').modal('show');
+}
+
+function setResourceLimit() {
+    const limitType = document.getElementById('limitType').value;
+    const limitValue = document.getElementById('limitValue').value;
+    const action = document.getElementById('limitAction').value;
+    const description = document.getElementById('limitDescription').value;
+
+    if (!limitType || !limitValue || !action) {
+        alert('Please fill in all required fields');
+        return;
+    }
+
+    const data = {
+        pid: {{ pid }},
+        limit_type: limitType,
+        limit_value: parseFloat(limitValue),
+        action: action,
+        description: description
+    };
+
+    fetch('/api/resource-limits', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            $('#resourceLimitModal').modal('hide');
+            alert('Resource limit set successfully!');
+            // Clear the form
+            document.getElementById('resourceLimitForm').reset();
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error setting resource limit');
+    });
+}
+
+// Clear form when modal is hidden
+$('#resourceLimitModal').on('hidden.bs.modal', function () {
+    document.getElementById('resourceLimitForm').reset();
+    $('#limitValueHelp').text('Enter the maximum allowed value');
+    $('#limitValue').removeAttr('max');
 });
 </script>
 {% endblock %}

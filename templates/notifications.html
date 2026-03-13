@@ -1,0 +1,323 @@
+{% extends 'base.html' %}
+
+{% block title %}Notifications - TrustScan{% endblock %}
+{% block section_label %}Alerts{% endblock %}
+{% block page_title %}Notification inbox{% endblock %}
+
+{% block content %}
+<section class="stats-grid">
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Unread</div>
+        <div class="metric-value">{{ unread_count }}</div>
+        <div class="metric-meta">Items waiting for review</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Email alerts</div>
+        <div class="metric-value" style="font-size: 1.4rem;">{{ 'On' if notification_preferences.email_notifications else 'Off' }}</div>
+        <div class="metric-meta">{{ notification_preferences.notification_min_severity }} and above</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Webhooks</div>
+        <div class="metric-value">{{ webhooks|length if is_admin else 'N/A' }}</div>
+        <div class="metric-meta">Configured destinations</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Role</div>
+        <div class="metric-value" style="font-size: 1.4rem;">{{ current_user.role }}</div>
+        <div class="metric-meta">Notification access level</div>
+    </article>
+</section>
+
+<section class="split-layout">
+    <article class="surface-card">
+        <div class="section-header">
+            <div>
+                <div class="panel-kicker">Preferences</div>
+                <h3>Your alert settings</h3>
+            </div>
+            <button class="btn-shell secondary" type="button" id="markAllRead">
+                <i class="fas fa-check-double"></i>
+                <span>Mark all read</span>
+            </button>
+        </div>
+        <form id="notificationPreferencesForm" class="page-grid">
+            <div>
+                <label for="notificationEmail">Email</label>
+                <input type="email" id="notificationEmail" name="email" value="{{ notification_preferences.email }}">
+            </div>
+            <div>
+                <label for="notificationSeverity">Minimum severity</label>
+                <select id="notificationSeverity" name="notification_min_severity">
+                    {% for severity in notification_preferences.severity_order %}
+                    <option value="{{ severity }}" {% if notification_preferences.notification_min_severity == severity %}selected{% endif %}>{{ severity }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="notificationEmailEnabled">Email delivery</label>
+                <select id="notificationEmailEnabled" name="email_notifications">
+                    <option value="true" {% if notification_preferences.email_notifications %}selected{% endif %}>enabled</option>
+                    <option value="false" {% if not notification_preferences.email_notifications %}selected{% endif %}>disabled</option>
+                </select>
+            </div>
+            <div>
+                <button class="btn-shell" type="submit">
+                    <i class="fas fa-save"></i>
+                    <span>Save preferences</span>
+                </button>
+            </div>
+        </form>
+    </article>
+
+    {% if is_admin %}
+    <article class="surface-card">
+        <div class="section-header">
+            <div>
+                <div class="panel-kicker">Webhook</div>
+                <h3>Add a delivery endpoint</h3>
+            </div>
+        </div>
+        <form id="webhookForm" class="page-grid">
+            <div>
+                <label for="webhookName">Name</label>
+                <input type="text" id="webhookName" name="name" required>
+            </div>
+            <div>
+                <label for="webhookUrl">URL</label>
+                <input type="url" id="webhookUrl" name="url" required>
+            </div>
+            <div>
+                <label for="webhookSecret">Signing secret</label>
+                <input type="text" id="webhookSecret" name="secret">
+            </div>
+            <div>
+                <label for="webhookSeverity">Minimum severity</label>
+                <select id="webhookSeverity" name="min_severity">
+                    <option value="medium">medium</option>
+                    <option value="high" selected>high</option>
+                    <option value="critical">critical</option>
+                </select>
+            </div>
+            <div>
+                <button class="btn-shell" type="submit">
+                    <i class="fas fa-plug"></i>
+                    <span>Add webhook</span>
+                </button>
+            </div>
+        </form>
+    </article>
+    {% endif %}
+</section>
+
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Inbox</div>
+            <h3>Recent notifications</h3>
+        </div>
+    </div>
+    {% if notifications %}
+    <div class="event-stack">
+        {% for item in notifications %}
+        <div class="event-row" data-filter-item="{{ item.title }} {{ item.message }} {{ item.source }} {{ item.severity }}">
+            <div class="toolbar-row">
+                <span class="severity-badge severity-{{ item.severity }}">{{ item.severity }}</span>
+                <span class="context-kicker">{{ item.source }}</span>
+                <span class="context-kicker">{{ item.created_at[:19] }}</span>
+                {% if item.is_read %}
+                <span class="status-badge status-running">read</span>
+                {% else %}
+                <span class="status-badge status-pending">unread</span>
+                {% endif %}
+            </div>
+            <strong>{{ item.title }}</strong>
+            <div class="muted">{{ item.message }}</div>
+            {% if not item.is_read %}
+            <div class="action-row">
+                <button class="btn-shell secondary mark-read" type="button" data-notification-id="{{ item.id }}">
+                    <i class="fas fa-check"></i>
+                    <span>Mark read</span>
+                </button>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No notifications in the inbox.</div>
+    {% endif %}
+</section>
+
+{% if is_admin %}
+<section class="split-layout">
+    <article class="surface-card">
+        <div class="section-header">
+            <div>
+                <div class="panel-kicker">Rules</div>
+                <h3>Channel routing</h3>
+            </div>
+        </div>
+        <div class="event-stack">
+            {% for rule in rules %}
+            <form class="event-row notification-rule-form" data-event-type="{{ rule.event_type }}">
+                <div class="toolbar-row">
+                    <strong>{{ rule.event_type }}</strong>
+                    <span class="context-kicker">minimum {{ rule.min_severity }}</span>
+                </div>
+                <div class="form-grid two">
+                    <div>
+                        <label>Email</label>
+                        <select name="email_enabled">
+                            <option value="true" {% if rule.email_enabled %}selected{% endif %}>enabled</option>
+                            <option value="false" {% if not rule.email_enabled %}selected{% endif %}>disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Webhook</label>
+                        <select name="webhook_enabled">
+                            <option value="true" {% if rule.webhook_enabled %}selected{% endif %}>enabled</option>
+                            <option value="false" {% if not rule.webhook_enabled %}selected{% endif %}>disabled</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Minimum severity</label>
+                        <select name="min_severity">
+                            {% for severity in notification_preferences.severity_order %}
+                            <option value="{{ severity }}" {% if rule.min_severity == severity %}selected{% endif %}>{{ severity }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <button class="btn-shell secondary" type="submit">
+                            <i class="fas fa-save"></i>
+                            <span>Update rule</span>
+                        </button>
+                    </div>
+                </div>
+            </form>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="surface-card">
+        <div class="section-header">
+            <div>
+                <div class="panel-kicker">Destinations</div>
+                <h3>Webhook endpoints</h3>
+            </div>
+        </div>
+        {% if webhooks %}
+        <div class="event-stack">
+            {% for webhook in webhooks %}
+            <div class="event-row">
+                <div class="toolbar-row">
+                    <strong>{{ webhook.name }}</strong>
+                    <span class="severity-badge severity-{{ webhook.min_severity }}">{{ webhook.min_severity }}</span>
+                </div>
+                <div class="muted mono">{{ webhook.url }}</div>
+                <div class="action-row">
+                    <button class="btn-shell danger delete-webhook" type="button" data-webhook-id="{{ webhook.id }}">
+                        <i class="fas fa-trash"></i>
+                        <span>Delete</span>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">No webhook endpoints configured.</div>
+        {% endif %}
+    </article>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("notificationPreferencesForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        try {
+            await TrustScan.requestJson("/api/notifications/preferences", {
+                method: "POST",
+                body: JSON.stringify({
+                    email: formData.get("email"),
+                    notification_min_severity: formData.get("notification_min_severity"),
+                    email_notifications: formData.get("email_notifications") === "true",
+                }),
+            });
+            TrustScan.showFlash("Notification preferences updated.", "success");
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.getElementById("markAllRead")?.addEventListener("click", async () => {
+        try {
+            await TrustScan.requestJson("/api/notifications/read-all", { method: "POST" });
+            window.location.reload();
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.querySelectorAll(".mark-read").forEach((button) => {
+        button.addEventListener("click", async () => {
+            try {
+                await TrustScan.requestJson(`/api/notifications/${button.dataset.notificationId}/read`, { method: "POST" });
+                window.location.reload();
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    document.getElementById("webhookForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        try {
+            await TrustScan.requestJson("/api/webhooks", {
+                method: "POST",
+                body: JSON.stringify(Object.fromEntries(formData.entries())),
+            });
+            window.location.reload();
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.querySelectorAll(".notification-rule-form").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const formData = new FormData(form);
+            try {
+                await TrustScan.requestJson("/api/notification-rules", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        event_type: form.dataset.eventType,
+                        email_enabled: formData.get("email_enabled") === "true",
+                        webhook_enabled: formData.get("webhook_enabled") === "true",
+                        min_severity: formData.get("min_severity"),
+                    }),
+                });
+                TrustScan.showFlash("Rule updated.", "success");
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    document.querySelectorAll(".delete-webhook").forEach((button) => {
+        button.addEventListener("click", async () => {
+            try {
+                await TrustScan.requestJson(`/api/webhooks/${button.dataset.webhookId}`, { method: "DELETE" });
+                window.location.reload();
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

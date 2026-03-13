@@ -1,165 +1,314 @@
 {% extends 'base.html' %}
 
-{% block title %}Dashboard - PortGuardian{% endblock %}
-
-{% block extra_css %}
-<style>
-    .table-hover tbody tr:hover {
-        background-color: rgba(0, 123, 255, 0.1);
-    }
-    .process-link {
-        text-decoration: none;
-    }
-    .process-link:hover {
-        text-decoration: underline;
-    }
-</style>
-{% endblock %}
+{% block title %}Overview - TrustScan{% endblock %}
+{% block section_label %}Overview{% endblock %}
+{% block page_title %}Operations overview{% endblock %}
 
 {% block content %}
-<div class="card shadow">
-    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-        <h4 class="mb-0"><i class="fas fa-network-wired me-2"></i>Open Ports & Processes</h4>
+<section class="stats-grid">
+    <article class="surface-card metric-tile">
+        <div class="metric-label">CPU</div>
+        <div class="metric-value">{{ "%.1f"|format(system_summary.cpu) }}%</div>
+        <div class="metric-meta">Overall host utilization</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Memory</div>
+        <div class="metric-value">{{ "%.1f"|format(system_summary.memory) }}%</div>
+        <div class="metric-meta">Current RAM usage</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Load</div>
+        <div class="metric-value">{{ "%.2f"|format(system_summary.load) }}</div>
+        <div class="metric-meta">1-minute system load</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Uptime</div>
+        <div class="metric-value" style="font-size: 1.4rem;">{{ system_summary.uptime }}</div>
+        <div class="metric-meta">Operating system runtime</div>
+    </article>
+</section>
+
+<section class="surface-card">
+    <div class="section-header">
         <div>
-            <button id="refreshBtn" class="btn btn-light btn-sm">
-                <i class="fas fa-sync-alt me-1"></i>Refresh
-            </button>
-            <a href="{{ url_for('export_data') }}" target="_blank" class="btn btn-light btn-sm ms-2">
-                <i class="fas fa-file-export me-1"></i>Export
+            <div class="panel-kicker">Dashboard</div>
+            <h3>Custom layout</h3>
+            <p class="mb-0">Drag widgets to reorder them. Visibility and layout persist per user.</p>
+        </div>
+        <div class="action-row">
+            <a class="btn-shell secondary" href="{{ url_for('ports_page') }}">
+                <i class="fas fa-network-wired"></i>
+                <span>Open full ports view</span>
+            </a>
+            <a class="btn-shell secondary" href="{{ url_for('managed_services_page') }}">
+                <i class="fas fa-server"></i>
+                <span>Managed services</span>
             </a>
         </div>
     </div>
-    <div class="card-body">
-        {% if permission_error or not ports %}
-        <div class="alert alert-warning">
-            <h4 class="alert-heading"><i class="fas fa-exclamation-triangle me-2"></i>Permission Required</h4>
-            <p>This application requires elevated privileges to access process and network information on macOS.</p>
-            <hr>
-            <p class="mb-0">To run with elevated privileges, try:</p>
-            <pre class="bg-light p-3 mt-2"><code>sudo python3 app.py</code></pre>
-            <p class="mt-3">Alternatively, you can use the following system commands to view port information:</p>
-            <pre class="bg-light p-3"><code>lsof -i -P | grep LISTEN    # Show listening ports
-netstat -an | grep LISTEN    # Alternative way to show listening ports</code></pre>
-        </div>
-        {% endif %}
 
-        <div class="table-responsive">
-            <table class="table table-hover table-striped" id="portsTable">
-                <thead class="table-dark">
-                    <tr>
-                        <th>Port</th>
-                        <th>Protocol</th>
-                        <th>Status</th>
-                        <th>PID</th>
-                        <th>Process</th>
-                        <th>Start Time</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for port in ports %}
-                    <tr>
-                        <td>{{ port.port }}</td>
-                        <td>
-                            <span class="badge {% if port.protocol == 'TCP' %}bg-primary{% else %}bg-success{% endif %}">
-                                {{ port.protocol }}
-                            </span>
-                        </td>
-                        <td>
-                            <span class="badge {% if port.status == 'LISTENING' %}bg-success{% else %}bg-warning{% endif %}">
-                                {{ port.status }}
-                            </span>
-                        </td>
-                        <td>{{ port.pid }}</td>
-                        <td>
-                            {% if port.pid != 'N/A' %}
-                            <a href="{{ url_for('enhanced_process_details', pid=port.pid) }}" class="process-link">
-                                {{ port.process_name }}
-                            </a>
-                            {% else %}
-                            {{ port.process_name }}
-                            {% endif %}
-                        </td>
-                        <td>{{ port.start_time }}</td>
-                        <td>
-                            {% if port.pid != 'N/A' %}
-                            <div class="btn-group" role="group">
-                                <a href="{{ url_for('enhanced_process_details', pid=port.pid) }}" class="btn btn-sm btn-info" title="Enhanced Details">
-                                    <i class="fas fa-chart-line"></i>
-                                </a>
-                                <a href="{{ url_for('process_detail', pid=port.pid) }}" class="btn btn-sm btn-outline-info" title="Basic Details">
-                                    <i class="fas fa-info-circle"></i>
-                                </a>
-                                <button class="btn btn-sm btn-danger kill-process" data-pid="{{ port.pid }}" data-process="{{ port.process_name }}">
-                                    <i class="fas fa-times-circle"></i>
-                                </button>
-                            </div>
-                            {% else %}
-                            <span class="text-muted">N/A</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <div class="filter-chip-group" id="widgetToggleGroup">
+        {% for widget_id in dashboard_preferences.widget_order %}
+        <button class="filter-chip" type="button" data-widget-toggle="{{ widget_id }}" data-active="{{ 'true' if dashboard_preferences.widget_visibility.get(widget_id, true) else 'false' }}">
+            {{ widget_id.replace('-', ' ').title() }}
+        </button>
+        {% endfor %}
     </div>
-</div>
+</section>
 
-<!-- Kill Process Confirmation Modal -->
-<div class="modal fade" id="killProcessModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title"><i class="fas fa-exclamation-triangle me-2"></i>Confirm Process Termination</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p>Are you sure you want to terminate the following process?</p>
-                <div class="alert alert-warning">
-                    <strong>Process:</strong> <span id="processName"></span><br>
-                    <strong>PID:</strong> <span id="processPid"></span>
+<section class="dashboard-grid" id="dashboardWidgets">
+    {% for widget_id in dashboard_preferences.widget_order %}
+        {% set visible = dashboard_preferences.widget_visibility.get(widget_id, true) %}
+        {% if widget_id == 'system-health' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="system health cpu memory uptime">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Host</div>
+                    <h3>System health</h3>
                 </div>
-                <p class="text-danger"><strong>Warning:</strong> Terminating system processes may cause instability!</p>
+                <a href="{{ url_for('system_health') }}">Details</a>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <form id="killProcessForm" method="post">
-                    <button type="submit" class="btn btn-danger">
-                        <i class="fas fa-times-circle me-1"></i>Terminate Process
-                    </button>
-                </form>
+            <div class="page-grid">
+                <div class="panel-row"><strong>OS</strong>{{ metrics.system_info.system }} {{ metrics.system_info.release }}</div>
+                <div class="panel-row"><strong>Hostname</strong>{{ metrics.system_info.node }}</div>
+                <div class="panel-row"><strong>Swap</strong>{{ metrics.memory_info.swap.percent }}%</div>
+                <div class="panel-row"><strong>Logical cores</strong>{{ metrics.cpu_info.total_cores }}</div>
             </div>
-        </div>
-    </div>
-</div>
+        </article>
+        {% elif widget_id == 'services' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="managed services running failed restart schedules">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Services</div>
+                    <h3>Managed service fleet</h3>
+                </div>
+                <span class="status-badge status-running">{{ service_summary.running }} running</span>
+            </div>
+            {% if services %}
+            <div class="service-stack">
+                {% for service in services[:4] %}
+                <div class="service-row">
+                    <div class="toolbar-row">
+                        <strong>{{ service.name }}</strong>
+                        <span class="status-badge status-{{ service.status }}">{{ service.status }}</span>
+                    </div>
+                    <div class="muted mono">{{ service.command }}</div>
+                    <div class="toolbar-row">
+                        <span class="badge-soft severity-info">{{ service.restart_policy }}</span>
+                        <span class="muted">{{ service.schedules|length }} schedules</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">No managed services configured yet.</div>
+            {% endif %}
+        </article>
+        {% elif widget_id == 'security' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="security threats intrusion">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Security</div>
+                    <h3>Recent threat activity</h3>
+                </div>
+                <a href="{{ url_for('security_dashboard') }}">Security dashboard</a>
+            </div>
+            {% if threats %}
+            <div class="event-stack">
+                {% for threat in threats[:4] %}
+                <div class="event-row">
+                    <div class="toolbar-row">
+                        <span class="severity-badge severity-{{ threat.threat_level }}">{{ threat.threat_level }}</span>
+                        <span class="context-kicker">{{ threat.threat_type.replace('_', ' ') }}</span>
+                    </div>
+                    <strong>{{ threat.source_ip }}</strong>
+                    <div class="muted">{{ threat.description }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">No threats recorded in the current window.</div>
+            {% endif %}
+        </article>
+        {% elif widget_id == 'ports' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="ports listening tcp udp">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Network</div>
+                    <h3>Listening ports snapshot</h3>
+                </div>
+                <a href="{{ url_for('ports_page') }}">Open ports</a>
+            </div>
+            {% if permission_error %}
+            <div class="empty-state">Detailed port visibility is limited without elevated host permissions.</div>
+            {% else %}
+            <div class="table-shell">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Port</th>
+                            <th>Protocol</th>
+                            <th>Process</th>
+                            <th>PID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for port in ports %}
+                        <tr data-filter-item="{{ port.port }} {{ port.protocol }} {{ port.process_name }} {{ port.pid }}">
+                            <td>{{ port.port }}</td>
+                            <td>{{ port.protocol }}</td>
+                            <td>{{ port.process_name }}</td>
+                            <td>{{ port.pid }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </article>
+        {% elif widget_id == 'favorites' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="favorites pinned saved">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Favorites</div>
+                    <h3>Pinned resources</h3>
+                </div>
+                <span class="muted">{{ favorites|length }} saved</span>
+            </div>
+            {% if favorites %}
+            <div class="favorite-stack">
+                {% for favorite in favorites %}
+                <div class="favorite-row">
+                    <div class="toolbar-row">
+                        <strong>{{ favorite.favorite.label }}</strong>
+                        <span class="context-kicker">{{ favorite.favorite.resource_type }}</span>
+                    </div>
+                    {% if favorite.available and favorite.kind == 'service' %}
+                    <div class="muted">Status: {{ favorite.data.status }} | Restart: {{ favorite.data.restart_policy }}</div>
+                    {% elif favorite.available and favorite.kind == 'process' %}
+                    <div class="muted">PID {{ favorite.data.pid }} | {{ favorite.data.name }} | {{ "%.1f"|format(favorite.data.cpu_percent) }}% CPU</div>
+                    {% elif favorite.available and favorite.kind == 'port' %}
+                    <div class="muted">{{ favorite.data.protocol }} {{ favorite.data.port }} | {{ favorite.data.process_name }}</div>
+                    {% else %}
+                    <div class="muted">Currently unavailable.</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">Pin ports, processes, and services for quick access.</div>
+            {% endif %}
+        </article>
+        {% elif widget_id == 'notifications' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="notifications alerts email webhook inbox">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Alerts</div>
+                    <h3>Notification inbox</h3>
+                </div>
+                <span class="severity-badge severity-high">{{ notification_unread_count }} unread</span>
+            </div>
+            {% if notifications %}
+            <div class="event-stack">
+                {% for item in notifications %}
+                <div class="event-row">
+                    <div class="toolbar-row">
+                        <span class="severity-badge severity-{{ item.severity }}">{{ item.severity }}</span>
+                        <span class="context-kicker">{{ item.source }}</span>
+                    </div>
+                    <strong>{{ item.title }}</strong>
+                    <div class="muted">{{ item.message }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">No notifications yet.</div>
+            {% endif %}
+        </article>
+        {% elif widget_id == 'audit' %}
+        <article class="surface-card widget-card {% if not visible %}hidden{% endif %}" data-widget="{{ widget_id }}" data-filter-item="audit activity history">
+            <div class="section-header">
+                <div>
+                    <div class="panel-kicker">Audit</div>
+                    <h3>Recent operator activity</h3>
+                </div>
+                <a href="{{ url_for('audit_logs') }}">Audit log</a>
+            </div>
+            {% if audit_logs %}
+            <div class="event-stack">
+                {% for log in audit_logs %}
+                <div class="event-row">
+                    <div class="toolbar-row">
+                        <span class="severity-badge severity-{{ log.severity }}">{{ log.severity }}</span>
+                        <span class="context-kicker">{{ log.event_type }}</span>
+                    </div>
+                    <strong>{{ log.username or 'system' }}</strong>
+                    <div class="muted">{{ log.action or log.resource }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="empty-state">No audit entries to show.</div>
+            {% endif %}
+        </article>
+        {% endif %}
+    {% endfor %}
+</section>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js"></script>
 <script>
-    $(document).ready(function() {
-        // Handle kill process button click
-        $('.kill-process').click(function() {
-            const pid = $(this).data('pid');
-            const processName = $(this).data('process');
+document.addEventListener("DOMContentLoaded", () => {
+    const dashboard = document.getElementById("dashboardWidgets");
+    const toggles = document.querySelectorAll("[data-widget-toggle]");
 
-            $('#processPid').text(pid);
-            $('#processName').text(processName);
-            $('#killProcessForm').attr('action', '/kill/' + pid);
+    function currentOrder() {
+        return Array.from(dashboard.querySelectorAll("[data-widget]")).map((card) => card.dataset.widget);
+    }
 
-            const modal = new bootstrap.Modal(document.getElementById('killProcessModal'));
-            modal.show();
+    function currentVisibility() {
+        const visibility = {};
+        dashboard.querySelectorAll("[data-widget]").forEach((card) => {
+            visibility[card.dataset.widget] = !card.classList.contains("hidden");
         });
+        return visibility;
+    }
 
-        // Handle refresh button click
-        $('#refreshBtn').click(function() {
-            location.reload();
+    async function persistDashboardState() {
+        try {
+            await TrustScan.requestJson("/api/dashboard/preferences", {
+                method: "POST",
+                body: JSON.stringify({
+                    widget_order: currentOrder(),
+                    widget_visibility: currentVisibility(),
+                }),
+            });
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    }
+
+    if (dashboard) {
+        Sortable.create(dashboard, {
+            animation: 150,
+            handle: ".section-header",
+            onEnd: persistDashboardState,
         });
+    }
 
-        // Auto-refresh every 30 seconds
-        setTimeout(function() {
-            location.reload();
-        }, 30000);
+    toggles.forEach((button) => {
+        button.addEventListener("click", async () => {
+            const widget = button.dataset.widgetToggle;
+            const card = dashboard.querySelector(`[data-widget="${widget}"]`);
+            if (!card) {
+                return;
+            }
+            card.classList.toggle("hidden");
+            button.dataset.active = String(!card.classList.contains("hidden"));
+            await persistDashboardState();
+        });
     });
+});
 </script>
 {% endblock %}

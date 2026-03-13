@@ -3,128 +3,167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}PortGuardian{% endblock %}</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome for icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <!-- Custom CSS -->
+    <title>{% block title %}TrustScan{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dark-theme.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
-<body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">
-                <i class="fas fa-shield-alt me-2"></i>PortGuardian
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    {% if current_user.is_authenticated %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('index') }}">
-                            <i class="fas fa-home me-1"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('charts') }}">
-                            <i class="fas fa-chart-line me-1"></i> Charts
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('system_health') }}">
-                            <i class="fas fa-heartbeat me-1"></i> System Health
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('audit_logs') }}">
-                            <i class="fas fa-clipboard-list me-1"></i> Audit Logs
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('process_groups') }}">
-                            <i class="fas fa-layer-group me-1"></i> Process Groups
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('security_dashboard') }}">
-                            <i class="fas fa-shield-alt me-1"></i> Security
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('resource_limits') }}">
-                            <i class="fas fa-tachometer-alt me-1"></i> Resource Limits
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('api_management') }}">
-                            <i class="fas fa-cogs me-1"></i> API Management
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('export_data') }}" target="_blank">
-                            <i class="fas fa-file-export me-1"></i> Export Data
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('logout') }}">
-                            <i class="fas fa-sign-out-alt me-1"></i> Logout
-                        </a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('login') }}">
-                            <i class="fas fa-sign-in-alt me-1"></i> Login
-                        </a>
-                    </li>
-                    {% endif %}
-                    <li class="nav-item">
-                        <a class="nav-link theme-toggle" id="themeToggle" href="javascript:void(0);">
-                            <i id="themeIcon" class="fas fa-moon me-1"></i> Theme
-                        </a>
-                    </li>
-                </ul>
+<body data-user-theme="{{ current_theme }}" data-theme="light" data-authenticated="{{ 'true' if current_user.is_authenticated else 'false' }}">
+    {% if current_user.is_authenticated %}
+    <div class="shell" id="appShell">
+        <aside class="shell-sidebar" id="shellSidebar">
+            <div class="brand-lockup">
+                <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
+                <div>
+                    <div class="brand-eyebrow">Operations Console</div>
+                    <a class="brand-name" href="{{ url_for('index') }}">TrustScan</a>
+                </div>
             </div>
-        </div>
-    </nav>
 
-    <!-- Main Content -->
-    <div class="container mt-4">
-        <!-- Flash Messages -->
+            <nav class="nav-stack">
+                <a class="nav-item {% if request.endpoint == 'index' %}active{% endif %}" href="{{ url_for('index') }}">
+                    <i class="fas fa-grid-2"></i><span>Overview</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'ports_page' %}active{% endif %}" href="{{ url_for('ports_page') }}">
+                    <i class="fas fa-network-wired"></i><span>Ports</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'managed_services_page' %}active{% endif %}" href="{{ url_for('managed_services_page') }}">
+                    <i class="fas fa-server"></i><span>Managed Services</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'system_health' %}active{% endif %}" href="{{ url_for('system_health') }}">
+                    <i class="fas fa-wave-square"></i><span>System Health</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'security_dashboard' %}active{% endif %}" href="{{ url_for('security_dashboard') }}">
+                    <i class="fas fa-radar"></i><span>Security</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'process_groups' %}active{% endif %}" href="{{ url_for('process_groups') }}">
+                    <i class="fas fa-layer-group"></i><span>Process Groups</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'resource_limits' %}active{% endif %}" href="{{ url_for('resource_limits') }}">
+                    <i class="fas fa-gauge-high"></i><span>Resource Limits</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'audit_logs' %}active{% endif %}" href="{{ url_for('audit_logs') }}">
+                    <i class="fas fa-clipboard-list"></i><span>Audit Logs</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'notifications_page' %}active{% endif %}" href="{{ url_for('notifications_page') }}">
+                    <i class="fas fa-bell"></i><span>Notifications</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'charts' %}active{% endif %}" href="{{ url_for('charts') }}">
+                    <i class="fas fa-chart-line"></i><span>Charts</span>
+                </a>
+                {% if is_admin %}
+                <a class="nav-item {% if request.endpoint == 'api_management' %}active{% endif %}" href="{{ url_for('api_management') }}">
+                    <i class="fas fa-key"></i><span>API Access</span>
+                </a>
+                <a class="nav-item {% if request.endpoint == 'user_settings_page' %}active{% endif %}" href="{{ url_for('user_settings_page') }}">
+                    <i class="fas fa-users-cog"></i><span>Users</span>
+                </a>
+                {% endif %}
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-dot"></div>
+                <span>{{ current_user.username }}</span>
+                <span class="role-pill">{{ current_user.role }}</span>
+            </div>
+        </aside>
+
+        <div class="shell-main">
+            <header class="shell-topbar">
+                <div class="topbar-left">
+                    <button class="icon-button mobile-only" id="sidebarToggle" type="button" aria-label="Toggle navigation">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div class="page-context">
+                        <div class="context-kicker">{% block section_label %}TrustScan{% endblock %}</div>
+                        <h1 class="context-title">{% block page_title %}Operations Overview{% endblock %}</h1>
+                    </div>
+                </div>
+
+                <div class="topbar-right">
+                    <label class="search-shell" for="globalFilter">
+                        <i class="fas fa-search"></i>
+                        <input id="globalFilter" type="search" placeholder="Filter this view">
+                    </label>
+
+                    <button class="icon-button" id="themeToggle" type="button" aria-label="Toggle theme">
+                        <i class="fas fa-moon" id="themeIcon"></i>
+                    </button>
+
+                    <div class="notification-shell">
+                        <button class="icon-button" id="notificationToggle" type="button" aria-label="Toggle notifications">
+                            <i class="fas fa-bell"></i>
+                            <span class="notification-count" id="notificationCount">{{ notification_unread_count }}</span>
+                        </button>
+                        <div class="notification-panel" id="notificationPanel">
+                            <div class="notification-panel-header">
+                                <div>
+                                    <div class="panel-kicker">Inbox</div>
+                                    <strong>Recent notifications</strong>
+                                </div>
+                                <a href="{{ url_for('notifications_page') }}">View all</a>
+                            </div>
+                            <div class="notification-panel-body" id="notificationPreview">
+                                <div class="empty-panel">Loading notifications…</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="user-chip">
+                        <div class="user-chip-meta">
+                            <strong>{{ current_user.username }}</strong>
+                            <span>{{ current_user.role }}</span>
+                        </div>
+                        <a class="icon-button danger" href="{{ url_for('logout') }}" aria-label="Logout">
+                            <i class="fas fa-arrow-right-from-bracket"></i>
+                        </a>
+                    </div>
+                </div>
+            </header>
+
+            <main class="shell-content">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                    <div class="flash-stack">
+                        {% for category, message in messages %}
+                        <div class="flash-card flash-{{ category if category in ['success', 'danger', 'warning', 'info'] else 'info' }}">
+                            <div>{{ message }}</div>
+                            <button class="flash-dismiss" type="button" aria-label="Dismiss">&times;</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                {% endwith %}
+
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+    {% else %}
+    <main class="auth-shell">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
+            <div class="flash-stack auth-flash">
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} alert-dismissible fade show">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
+                <div class="flash-card flash-{{ category if category in ['success', 'danger', 'warning', 'info'] else 'info' }}">
+                    <div>{{ message }}</div>
+                    <button class="flash-dismiss" type="button" aria-label="Dismiss">&times;</button>
+                </div>
                 {% endfor %}
+            </div>
             {% endif %}
         {% endwith %}
+        {% block auth_content %}{% endblock %}
+    </main>
+    {% endif %}
 
-        <!-- Page Content -->
-        {% block content %}{% endblock %}
-    </div>
-
-    <!-- Footer -->
-    <footer class="bg-dark text-white text-center py-3 mt-5">
-        <div class="container">
-            <p class="mb-0">PortGuardian &copy; 2024 - A Port and Process Monitoring Platform</p>
-        </div>
-    </footer>
-
-    <!-- Bootstrap JS Bundle with Popper -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- jQuery -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <!-- Custom JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/theme-switcher.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

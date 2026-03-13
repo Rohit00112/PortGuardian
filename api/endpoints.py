@@ -18,9 +18,9 @@ logger = logging.getLogger('api')
 def api_docs():
     """API documentation."""
     return jsonify({
-        'name': 'PortGuardian API',
+        'name': 'TrustScan API',
         'version': '1.0.0',
-        'description': 'RESTful API for PortGuardian - Port and Process Monitoring Platform',
+        'description': 'RESTful API for TrustScan - Host operations and security monitoring',
         'base_url': '/api/v1',
         'authentication': {
             'type': 'API Key',

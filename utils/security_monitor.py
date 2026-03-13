@@ -43,6 +43,7 @@ class SecurityMonitor:
         self.monitoring = False
         self.monitor_thread = None
         self.lock = threading.Lock()
+        self.event_callback = None
 
         # Configuration thresholds
         self.config = {
@@ -55,6 +56,9 @@ class SecurityMonitor:
         }
 
         self.init_database()
+
+    def set_event_callback(self, callback):
+        self.event_callback = callback
 
     def init_database(self):
         """Initialize the security monitoring database."""
@@ -324,6 +328,26 @@ class SecurityMonitor:
 
                 conn.commit()
                 logger.warning(f"Threat detected: {description}")
+                if self.event_callback:
+                    try:
+                        self.event_callback(
+                            title="Security threat detected",
+                            message=description,
+                            severity=threat_level.value,
+                            event_type="security_threat",
+                            source="security",
+                            payload={
+                                "source_ip": source_ip,
+                                "threat_type": threat_type.value,
+                                "details": details,
+                                "port_count": port_count,
+                                "connection_count": connection_count,
+                                "time_window": time_window,
+                            },
+                            resource_key=f"security:{source_ip}:{threat_type.value}",
+                        )
+                    except Exception as callback_error:
+                        logger.error(f"Error forwarding threat notification: {str(callback_error)}")
 
         except Exception as e:
             logger.error(f"Error logging threat: {str(e)}")

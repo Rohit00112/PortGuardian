@@ -42,7 +42,11 @@ class ResourceLimiter:
         self.monitor_thread = None
         self.lock = threading.Lock()
         self.violation_counts = {}  # Track consecutive violations
+        self.event_callback = None
         self.init_database()
+
+    def set_event_callback(self, callback):
+        self.event_callback = callback
     
     def init_database(self):
         """Initialize the resource limits database."""
@@ -498,6 +502,29 @@ class ResourceLimiter:
                     limit['limit_value'], current_value, action, success, details
                 ))
                 conn.commit()
+                if self.event_callback:
+                    try:
+                        severity = "high" if success else "critical"
+                        self.event_callback(
+                            title="Resource limit violation",
+                            message=f"{limit['process_name']} ({limit['pid']}) exceeded {limit['limit_type']}.",
+                            severity=severity,
+                            event_type="resource_limit_violation",
+                            source="resource_limits",
+                            payload={
+                                "pid": limit['pid'],
+                                "process_name": limit['process_name'],
+                                "limit_type": limit['limit_type'],
+                                "limit_value": limit['limit_value'],
+                                "actual_value": current_value,
+                                "action": action,
+                                "success": success,
+                                "details": details,
+                            },
+                            resource_key=f"process:{limit['pid']}",
+                        )
+                    except Exception as callback_error:
+                        logger.error(f"Error forwarding resource notification: {str(callback_error)}")
 
         except Exception as e:
             logger.error(f"Error logging violation: {str(e)}")

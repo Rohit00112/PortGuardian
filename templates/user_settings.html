@@ -1,0 +1,184 @@
+{% extends 'base.html' %}
+
+{% block title %}Users - TrustScan{% endblock %}
+{% block section_label %}Administration{% endblock %}
+{% block page_title %}User management{% endblock %}
+
+{% block content %}
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Users</div>
+            <h3>Create a local account</h3>
+        </div>
+    </div>
+    <form id="createUserForm" class="form-grid two">
+        <div>
+            <label for="newUsername">Username</label>
+            <input type="text" id="newUsername" name="username" required>
+        </div>
+        <div>
+            <label for="newEmail">Email</label>
+            <input type="email" id="newEmail" name="email">
+        </div>
+        <div>
+            <label for="newPassword">Password</label>
+            <input type="password" id="newPassword" name="password" required>
+        </div>
+        <div>
+            <label for="newRole">Role</label>
+            <select id="newRole" name="role">
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+            </select>
+        </div>
+        <div>
+            <label for="newNotifications">Email notifications</label>
+            <select id="newNotifications" name="email_notifications">
+                <option value="false" selected>disabled</option>
+                <option value="true">enabled</option>
+            </select>
+        </div>
+        <div>
+            <label for="newSeverity">Minimum notification severity</label>
+            <select id="newSeverity" name="notification_min_severity">
+                <option value="medium">medium</option>
+                <option value="high" selected>high</option>
+                <option value="critical">critical</option>
+            </select>
+        </div>
+        <div>
+            <button class="btn-shell" type="submit">
+                <i class="fas fa-user-plus"></i>
+                <span>Create user</span>
+            </button>
+        </div>
+    </form>
+</section>
+
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Accounts</div>
+            <h3>Current users</h3>
+        </div>
+    </div>
+    {% if users %}
+    <div class="event-stack">
+        {% for user in users %}
+        <form class="event-row update-user-form" data-user-id="{{ user.id }}">
+            <div class="toolbar-row">
+                <strong>{{ user.username }}</strong>
+                <span class="filter-chip">{{ user.role }}</span>
+                <span class="status-badge {{ 'status-running' if user.is_active else 'status-failed' }}">
+                    {{ 'active' if user.is_active else 'disabled' }}
+                </span>
+            </div>
+            <div class="form-grid two">
+                <div>
+                    <label>Username</label>
+                    <input type="text" name="username" value="{{ user.username }}">
+                </div>
+                <div>
+                    <label>Email</label>
+                    <input type="email" name="email" value="{{ user.email or '' }}">
+                </div>
+                <div>
+                    <label>Role</label>
+                    <select name="role">
+                        <option value="viewer" {% if user.role == 'viewer' %}selected{% endif %}>viewer</option>
+                        <option value="admin" {% if user.role == 'admin' %}selected{% endif %}>admin</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Status</label>
+                    <select name="is_active">
+                        <option value="true" {% if user.is_active %}selected{% endif %}>active</option>
+                        <option value="false" {% if not user.is_active %}selected{% endif %}>disabled</option>
+                    </select>
+                </div>
+                <div>
+                    <label>New password</label>
+                    <input type="password" name="password" placeholder="Leave blank to keep current">
+                </div>
+                <div>
+                    <label>Email notifications</label>
+                    <select name="email_notifications">
+                        <option value="true" {% if user.email_notifications %}selected{% endif %}>enabled</option>
+                        <option value="false" {% if not user.email_notifications %}selected{% endif %}>disabled</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Minimum severity</label>
+                    <select name="notification_min_severity">
+                        <option value="medium" {% if user.notification_min_severity == 'medium' %}selected{% endif %}>medium</option>
+                        <option value="high" {% if user.notification_min_severity == 'high' %}selected{% endif %}>high</option>
+                        <option value="critical" {% if user.notification_min_severity == 'critical' %}selected{% endif %}>critical</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Theme</label>
+                    <select name="theme">
+                        <option value="system" {% if user.theme == 'system' %}selected{% endif %}>system</option>
+                        <option value="light" {% if user.theme == 'light' %}selected{% endif %}>light</option>
+                        <option value="dark" {% if user.theme == 'dark' %}selected{% endif %}>dark</option>
+                    </select>
+                </div>
+            </div>
+            <div class="muted">Created {{ user.created_at }} · Last login {{ user.last_login or 'Never' }}</div>
+            <div class="action-row">
+                <button class="btn-shell secondary" type="submit">
+                    <i class="fas fa-save"></i>
+                    <span>Update user</span>
+                </button>
+            </div>
+        </form>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No users found.</div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("createUserForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        payload.email_notifications = payload.email_notifications === "true";
+        try {
+            await TrustScan.requestJson("/api/users", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            window.location.reload();
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.querySelectorAll(".update-user-form").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const payload = Object.fromEntries(new FormData(form).entries());
+            payload.is_active = payload.is_active === "true";
+            payload.email_notifications = payload.email_notifications === "true";
+            if (!payload.password) {
+                delete payload.password;
+            }
+            try {
+                await TrustScan.requestJson(`/api/users/${form.dataset.userId}`, {
+                    method: "PUT",
+                    body: JSON.stringify(payload),
+                });
+                TrustScan.showFlash("User updated.", "success");
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

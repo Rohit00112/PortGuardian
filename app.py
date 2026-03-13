@@ -1,1120 +1,1216 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
-import os
-import json
 import logging
+import os
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from utils.port_scanner import get_open_ports
-from utils.process_manager import get_process_info, kill_process
-from utils.metrics_storage import metrics_storage
-from utils.metrics_collector import metrics_collector
-from utils.api_auth import api_key_manager
+from flask import Flask, Response, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask_login import LoginManager, current_user, login_required, login_user, logout_user
+
 from api.endpoints import api_bp
-from utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+from utils.api_auth import api_key_manager
 from utils.audit_decorators import audit_action, audit_login_attempt, audit_logout, audit_process_kill
-from utils.system_monitor import get_all_system_metrics
-from utils.process_groups import process_group_manager
-from utils.security_monitor import security_monitor
+from utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
+from utils.authz import admin_required
 from utils.enhanced_process_manager import enhanced_process_manager
+from utils.managed_services import managed_service_manager
+from utils.metrics_collector import metrics_collector
+from utils.metrics_storage import metrics_storage
+from utils.notifications import notification_manager
+from utils.port_scanner import get_open_ports
+from utils.process_groups import process_group_manager
+from utils.process_manager import get_process_info, kill_process
 from utils.resource_limiter import resource_limiter
+from utils.security_monitor import security_monitor
+from utils.system_monitor import get_all_system_metrics
+from utils.users import SEVERITY_ORDER, user_manager
 
-# Configure logging
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    filename='app.log',
-    filemode='a'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    filename="app.log",
+    filemode="a",
 )
-logger = logging.getLogger('portguardian')
+logger = logging.getLogger("trustscan")
 
-# Initialize Flask app
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.urandom(24)
-app.config['SESSION_TYPE'] = 'filesystem'
+app.config["SECRET_KEY"] = os.getenv("TRUSTSCAN_SECRET_KEY", "trustscan-dev-secret")
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["JSON_SORT_KEYS"] = False
 
-# Initialize Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'login'
+login_manager.login_view = "login"
 
-# Register API blueprint
 app.register_blueprint(api_bp)
 
-# Simple user model for authentication
-class User(UserMixin):
-    def __init__(self, id, username, password_hash):
-        self.id = id
-        self.username = username
-        self.password_hash = password_hash
 
-# For demo purposes, we'll use a simple dictionary to store users
-# In a real application, you would use a database
-users = {
-    1: User(1, 'admin', generate_password_hash('admin'))
-}
+managed_service_manager.set_event_callback(notification_manager.create_notification)
+resource_limiter.set_event_callback(notification_manager.create_notification)
+security_monitor.set_event_callback(notification_manager.create_notification)
+
+
+def _is_api_request() -> bool:
+    return request.path.startswith("/api/")
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _sort_ports(ports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def sort_key(port: Dict[str, Any]):
+        port_value = port.get("port")
+        if isinstance(port_value, int):
+            return (0, port_value, str(port.get("protocol", "")))
+        return (1, str(port_value), str(port.get("protocol", "")))
+
+    return sorted(ports, key=sort_key)
+
+
+def _get_ports_snapshot(limit: Optional[int] = None) -> Dict[str, Any]:
+    ports = _sort_ports(get_open_ports())
+    permission_error = bool(ports and ports[0].get("process_name") == "Permission Denied")
+    if limit is not None:
+        ports = ports[:limit]
+    return {"ports": ports, "permission_error": permission_error}
+
+
+def _get_service_summary(services: List[Dict[str, Any]]) -> Dict[str, int]:
+    return {
+        "total": len(services),
+        "running": sum(1 for service in services if service.get("status") == "running"),
+        "failed": sum(1 for service in services if service.get("status") == "failed"),
+        "scheduled": sum(1 for service in services if service.get("schedules")),
+    }
+
+
+def _resolve_favorites(favorites: List[Dict[str, Any]], ports: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    port_map = {f"port:{port['protocol']}:{port['port']}": port for port in ports if port.get("port") != "N/A"}
+    resolved = []
+    for favorite in favorites:
+        resource_key = favorite["resource_key"]
+        item = {"favorite": favorite, "kind": favorite["resource_type"], "data": None, "available": True}
+        if resource_key.startswith("port:"):
+            item["data"] = port_map.get(resource_key)
+            item["available"] = item["data"] is not None
+        elif resource_key.startswith("process:"):
+            pid = _safe_int(resource_key.split(":", 1)[1], 0)
+            item["data"] = get_process_info(pid) if pid else None
+            item["available"] = item["data"] is not None
+        elif resource_key.startswith("service:"):
+            service_id = _safe_int(resource_key.split(":", 1)[1], 0)
+            item["data"] = managed_service_manager.get_service(service_id) if service_id else None
+            item["available"] = item["data"] is not None
+        resolved.append(item)
+    return resolved
+
+
+def _dashboard_context() -> Dict[str, Any]:
+    ports_snapshot = _get_ports_snapshot(limit=10)
+    ports = ports_snapshot["ports"]
+    metrics = get_all_system_metrics()
+    services = managed_service_manager.list_services()
+    notifications = notification_manager.get_notifications(current_user.id, limit=6)
+    favorites = user_manager.get_favorites(current_user.id)
+    return {
+        "metrics": metrics,
+        "system_summary": {
+            "cpu": metrics.get("cpu_info", {}).get("overall_percent", 0),
+            "memory": metrics.get("memory_info", {}).get("virtual", {}).get("percent", 0),
+            "uptime": metrics.get("uptime_info", {}).get("uptime_formatted", "Unavailable"),
+            "load": metrics.get("load_info", {}).get("load_1_min", 0),
+        },
+        "ports": ports,
+        "permission_error": ports_snapshot["permission_error"],
+        "service_summary": _get_service_summary(services),
+        "services": services[:6],
+        "threats": security_monitor.get_recent_threats(hours=24, limit=6),
+        "audit_logs": audit_logger.get_logs(limit=6),
+        "notifications": notifications["items"],
+        "notification_unread_count": notifications["unread_count"],
+        "favorites": _resolve_favorites(favorites, ports),
+        "dashboard_preferences": user_manager.get_dashboard_preferences(current_user.id),
+    }
+
+
+def _notification_preferences_context() -> Dict[str, Any]:
+    return {
+        "email": current_user.email or "",
+        "email_notifications": bool(current_user.email_notifications),
+        "notification_min_severity": current_user.notification_min_severity,
+        "severity_order": list(SEVERITY_ORDER.keys()),
+    }
+
+
+def _update_audit_for_user_change(action: str, details: Dict[str, Any]):
+    audit_logger.log_event(
+        event_type=AuditEventType.PROCESS_MANAGEMENT,
+        severity=AuditSeverity.MEDIUM,
+        user_id=str(current_user.id) if current_user.is_authenticated else None,
+        username=current_user.username if current_user.is_authenticated else None,
+        ip_address=request.environ.get("HTTP_X_FORWARDED_FOR", request.remote_addr),
+        user_agent=request.headers.get("User-Agent", ""),
+        resource="users",
+        action=action,
+        details=details,
+    )
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    return users.get(int(user_id))
+    return user_manager.get_user_by_id(_safe_int(user_id, 0))
 
-# Routes
-@app.route('/')
+
+@login_manager.unauthorized_handler
+def unauthorized():
+    if _is_api_request():
+        return jsonify({"status": "error", "message": "Authentication required"}), 401
+    return redirect(url_for("login"))
+
+
+@app.before_request
+def require_bootstrap():
+    if user_manager.has_users():
+        return None
+
+    allowed_endpoints = {"setup", "login", "static"}
+    if request.endpoint in allowed_endpoints or request.path.startswith("/api/v1"):
+        return None
+    if _is_api_request():
+        return jsonify({"status": "error", "message": "Run initial setup first"}), 503
+    return redirect(url_for("setup"))
+
+
+@app.context_processor
+def inject_shell_context():
+    unread_count = 0
+    if current_user.is_authenticated:
+        unread_count = notification_manager.get_notifications(current_user.id, limit=5)["unread_count"]
+    return {
+        "app_name": "TrustScan",
+        "is_admin": bool(current_user.is_authenticated and current_user.role == "admin"),
+        "current_theme": current_user.theme if current_user.is_authenticated else "system",
+        "notification_unread_count": unread_count,
+    }
+
+
+@app.errorhandler(401)
+def handle_401(error):
+    if _is_api_request():
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    flash("Authentication is required.", "danger")
+    return redirect(url_for("login"))
+
+
+@app.errorhandler(403)
+def handle_403(error):
+    if _is_api_request():
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
+    flash("You do not have permission to perform that action.", "danger")
+    return redirect(url_for("index"))
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    if user_manager.has_users():
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+        email = request.form.get("email", "").strip() or None
+
+        if not username or not password:
+            flash("Username and password are required.", "danger")
+            return render_template("setup.html")
+        if password != confirm_password:
+            flash("Passwords do not match.", "danger")
+            return render_template("setup.html")
+
+        user_manager.create_user(username=username, password=password, role="admin", email=email)
+        audit_logger.log_event(
+            event_type=AuditEventType.LOGIN,
+            severity=AuditSeverity.HIGH,
+            username=username,
+            resource="setup",
+            action="create_first_admin",
+            details={"email": email},
+            success=True,
+        )
+        flash("Initial admin account created. You can sign in now.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("setup.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not user_manager.has_users():
+        return redirect(url_for("setup"))
+    if current_user.is_authenticated:
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        user = user_manager.authenticate(username, password)
+        if user:
+            login_user(user)
+            audit_login_attempt(success=True, username=username)
+            return redirect(url_for("index"))
+
+        audit_login_attempt(success=False, username=username, error_message="Invalid credentials")
+        flash("Invalid username or password.", "danger")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
 @login_required
-@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="dashboard", action="view_dashboard")
+def logout():
+    username = current_user.username
+    audit_logout(username)
+    logout_user()
+    return redirect(url_for("login"))
+
+
+@app.route("/")
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="dashboard", action="view_overview")
 def index():
-    """Home dashboard showing all open ports and processes."""
-    try:
-        ports = get_open_ports()
-        permission_error = False
-    except Exception as e:
-        logger.error(f"Error in index route: {str(e)}")
-        ports = []
-        permission_error = True
+    return render_template("index.html", **_dashboard_context())
 
-    return render_template('index.html', ports=ports, permission_error=permission_error)
 
-@app.route('/process/<int:pid>')
+@app.route("/ports")
+@login_required
+@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="ports", action="view_ports")
+def ports_page():
+    ports_snapshot = _get_ports_snapshot()
+    favorite_keys = {favorite["resource_key"] for favorite in user_manager.get_favorites(current_user.id)}
+    return render_template(
+        "ports.html",
+        ports=ports_snapshot["ports"],
+        permission_error=ports_snapshot["permission_error"],
+        favorite_keys=favorite_keys,
+    )
+
+
+@app.route("/process/<int:pid>")
 @login_required
 @audit_action(AuditEventType.PROCESS_VIEW, AuditSeverity.LOW, resource="process", action="view_process_details")
 def process_detail(pid):
-    """Detailed view of a specific process."""
     process_info = get_process_info(pid)
     if not process_info:
-        flash('Process not found', 'danger')
-        return redirect(url_for('index'))
-    return render_template('process_detail.html', process=process_info)
+        flash("Process not found.", "danger")
+        return redirect(url_for("ports_page"))
+    return render_template("process_detail.html", process=process_info)
 
-@app.route('/kill/<int:pid>', methods=['POST'])
+
+@app.route("/process/<int:pid>/details")
 @login_required
+@audit_action(AuditEventType.PROCESS_VIEW, AuditSeverity.LOW, resource="process", action="view_enhanced_process")
+def enhanced_process_details(pid):
+    process_info = enhanced_process_manager.get_enhanced_process_info(pid)
+    if not process_info:
+        flash(f"Process with PID {pid} not found.", "danger")
+        return redirect(url_for("ports_page"))
+    return render_template("enhanced_process_details.html", process=process_info, pid=pid)
+
+
+@app.route("/kill/<int:pid>", methods=["POST"])
+@login_required
+@admin_required
 def kill_process_route(pid):
-    """Kill a process by PID."""
-    # Get process name before killing for audit log
     process_info = get_process_info(pid)
-    process_name = process_info.get('name', 'Unknown') if process_info else 'Unknown'
-
+    process_name = process_info.get("name", "Unknown") if process_info else "Unknown"
     result = kill_process(pid, user_id=current_user.username)
-
-    # Audit the process kill attempt
     audit_process_kill(
         pid=pid,
         process_name=process_name,
-        success=result['success'],
-        error_message=result['message'] if not result['success'] else None
+        success=result["success"],
+        error_message=result["message"] if not result["success"] else None,
     )
-
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest" or _is_api_request():
         return jsonify(result)
+    flash(result["message"], "success" if result["success"] else "danger")
+    return redirect(url_for("ports_page"))
 
-    if result['success']:
-        flash(result['message'], 'success')
-    else:
-        flash(result['message'], 'danger')
 
-    return redirect(url_for('index'))
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    """User login page."""
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-
-        # Find user by username
-        user = next((u for u in users.values() if u.username == username), None)
-
-        if user and check_password_hash(user.password_hash, password):
-            login_user(user)
-            logger.info(f"User {username} logged in")
-
-            # Audit successful login
-            audit_login_attempt(success=True, username=username)
-
-            return redirect(url_for('index'))
-
-        # Audit failed login attempt
-        audit_login_attempt(success=False, username=username, error_message="Invalid credentials")
-
-        flash('Invalid username or password', 'danger')
-
-    return render_template('login.html')
-
-@app.route('/logout')
-@login_required
-def logout():
-    """User logout."""
-    username = current_user.username
-
-    # Audit logout
-    audit_logout(username)
-
-    logout_user()
-    return redirect(url_for('login'))
-
-@app.route('/api/ports')
-@login_required
-def api_ports():
-    """API endpoint to get all open ports as JSON."""
-    ports = get_open_ports()
-    return jsonify(ports)
-
-@app.route('/api/process/<int:pid>')
-@login_required
-def api_process(pid):
-    """API endpoint to get process details as JSON."""
-    process_info = get_process_info(pid)
-    if not process_info:
-        return jsonify({'error': 'Process not found'}), 404
-    return jsonify(process_info)
-
-@app.route('/charts')
+@app.route("/charts")
 @login_required
 def charts():
-    """Real-time charts dashboard."""
-    return render_template('charts.html')
+    return render_template("charts.html")
 
-@app.route('/api/chart-data/<metric_type>')
+
+@app.route("/system-health")
 @login_required
-def api_chart_data(metric_type):
-    """API endpoint to get chart data for specific metric type."""
-    try:
-        hours = int(request.args.get('hours', 24))
+@audit_action(AuditEventType.SYSTEM_HEALTH_VIEW, AuditSeverity.LOW, resource="system", action="view_system_health")
+def system_health():
+    metrics = get_all_system_metrics()
+    return render_template("system_health.html", metrics=metrics)
 
-        # Define metric names for each type
-        metric_mappings = {
-            'cpu': ['overall_percent', 'core_0_percent', 'core_1_percent'],
-            'memory': ['virtual_percent', 'swap_percent'],
-            'load': ['load_1_min', 'load_5_min', 'load_15_min'],
-            'disk': [],  # Will be populated dynamically
-            'network': []  # Will be populated dynamically
-        }
 
-        # For disk and network, get available metrics dynamically
-        if metric_type == 'disk':
-            # Get recent disk metrics to determine available partitions
-            recent_metrics = metrics_storage.get_metrics(metric_type='disk', limit=10)
-            disk_metrics = set()
-            for metric in recent_metrics:
-                if metric['metric_name'].endswith('_percent'):
-                    disk_metrics.add(metric['metric_name'])
-            metric_mappings['disk'] = list(disk_metrics)[:5]  # Limit to 5 partitions
-
-        elif metric_type == 'network':
-            # Get recent network metrics to determine available interfaces
-            recent_metrics = metrics_storage.get_metrics(metric_type='network', limit=10)
-            network_metrics = set()
-            for metric in recent_metrics:
-                if 'bytes_sent' in metric['metric_name']:
-                    interface = metric['metric_name'].replace('_bytes_sent', '')
-                    network_metrics.add(f"{interface}_bytes_sent")
-                    network_metrics.add(f"{interface}_bytes_recv")
-            metric_mappings['network'] = list(network_metrics)[:6]  # Limit to 3 interfaces (sent/recv)
-
-        metric_names = metric_mappings.get(metric_type, [])
-
-        if not metric_names:
-            return jsonify({'error': f'No metrics available for type: {metric_type}'}), 404
-
-        chart_data = metrics_storage.get_chart_data(metric_type, metric_names, hours)
-
-        return jsonify(chart_data)
-
-    except Exception as e:
-        logger.error(f"Error getting chart data: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/metrics/collect')
-@login_required
-def api_collect_metrics():
-    """API endpoint to manually trigger metrics collection."""
-    try:
-        metrics_collector.collect_now()
-        return jsonify({'success': True, 'message': 'Metrics collected successfully'})
-    except Exception as e:
-        logger.error(f"Error collecting metrics: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/save-theme', methods=['POST'])
-@login_required
-def save_theme():
-    """Save user theme preference."""
-    try:
-        theme = request.json.get('theme', 'light')
-        # In a real application, you would save this to a database
-        # For now, we'll just return success
-        return jsonify({'success': True, 'theme': theme})
-    except Exception as e:
-        logger.error(f"Error saving theme preference: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/audit-logs')
+@app.route("/audit-logs")
 @login_required
 @audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="audit", action="view_audit_logs")
 def audit_logs():
-    """View audit logs."""
-    try:
-        # Get filter parameters
-        event_type = request.args.get('event_type')
-        severity = request.args.get('severity')
-        user_id = request.args.get('user_id')
-        page = int(request.args.get('page', 1))
-        per_page = int(request.args.get('per_page', 50))
+    event_type = request.args.get("event_type")
+    severity = request.args.get("severity")
+    user_id = request.args.get("user_id")
+    page = max(_safe_int(request.args.get("page"), 1), 1)
+    per_page = max(_safe_int(request.args.get("per_page"), 50), 1)
 
-        # Convert string parameters to enum values
-        event_type_enum = None
-        if event_type:
-            try:
-                event_type_enum = AuditEventType(event_type)
-            except ValueError:
-                pass
+    event_enum = AuditEventType(event_type) if event_type in {item.value for item in AuditEventType} else None
+    severity_enum = AuditSeverity(severity) if severity in {item.value for item in AuditSeverity} else None
+    logs = audit_logger.get_logs(
+        limit=per_page,
+        offset=(page - 1) * per_page,
+        event_type=event_enum,
+        severity=severity_enum,
+        user_id=user_id,
+    )
+    return render_template(
+        "audit_logs.html",
+        logs=logs,
+        stats=audit_logger.get_log_statistics(),
+        page=page,
+        per_page=per_page,
+        event_types=[event.value for event in AuditEventType],
+        severities=[severity.value for severity in AuditSeverity],
+        selected_event_type=event_type,
+        selected_severity=severity,
+        selected_user_id=user_id,
+    )
 
-        severity_enum = None
-        if severity:
-            try:
-                severity_enum = AuditSeverity(severity)
-            except ValueError:
-                pass
 
-        # Get logs with pagination
-        offset = (page - 1) * per_page
-        logs = audit_logger.get_logs(
-            limit=per_page,
-            offset=offset,
-            event_type=event_type_enum,
-            severity=severity_enum,
-            user_id=user_id
-        )
-
-        # Get statistics
-        stats = audit_logger.get_log_statistics()
-
-        return render_template('audit_logs.html',
-                             logs=logs,
-                             stats=stats,
-                             page=page,
-                             per_page=per_page,
-                             event_types=[e.value for e in AuditEventType],
-                             severities=[s.value for s in AuditSeverity])
-
-    except Exception as e:
-        logger.error(f"Error in audit logs route: {str(e)}")
-        flash(f"Error retrieving audit logs: {str(e)}", 'danger')
-        return redirect(url_for('index'))
-
-@app.route('/api/audit-logs')
-@login_required
-@audit_action(AuditEventType.API_ACCESS, AuditSeverity.MEDIUM, resource="audit_api", action="get_audit_logs")
-def api_audit_logs():
-    """API endpoint to get audit logs as JSON."""
-    try:
-        # Get filter parameters
-        event_type = request.args.get('event_type')
-        severity = request.args.get('severity')
-        user_id = request.args.get('user_id')
-        limit = int(request.args.get('limit', 100))
-        offset = int(request.args.get('offset', 0))
-
-        # Convert string parameters to enum values
-        event_type_enum = None
-        if event_type:
-            try:
-                event_type_enum = AuditEventType(event_type)
-            except ValueError:
-                pass
-
-        severity_enum = None
-        if severity:
-            try:
-                severity_enum = AuditSeverity(severity)
-            except ValueError:
-                pass
-
-        logs = audit_logger.get_logs(
-            limit=limit,
-            offset=offset,
-            event_type=event_type_enum,
-            severity=severity_enum,
-            user_id=user_id
-        )
-
-        return jsonify(logs)
-
-    except Exception as e:
-        logger.error(f"Error in audit logs API: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/export-audit-logs')
+@app.route("/export-audit-logs")
 @login_required
 @audit_action(AuditEventType.DATA_EXPORT, AuditSeverity.HIGH, resource="audit", action="export_audit_logs")
 def export_audit_logs():
-    """Export audit logs."""
-    try:
-        format_type = request.args.get('format', 'json')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+    format_type = request.args.get("format", "json").lower()
+    start_date = request.args.get("start_date")
+    end_date = request.args.get("end_date")
+    exported_data = audit_logger.export_logs(format=format_type, start_date=start_date, end_date=end_date)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    filename = f"audit_logs_{timestamp}.{format_type}"
+    if format_type == "json":
+        return jsonify({"filename": filename, "data": exported_data, "timestamp": timestamp})
+    return Response(
+        exported_data,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
-        exported_data = audit_logger.export_logs(
-            format=format_type,
-            start_date=start_date,
-            end_date=end_date
-        )
 
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"audit_logs_{timestamp}.{format_type}"
-
-        if format_type.lower() == 'json':
-            return jsonify({
-                'filename': filename,
-                'data': exported_data,
-                'timestamp': timestamp
-            })
-        else:
-            # For CSV, return as text
-            from flask import Response
-            return Response(
-                exported_data,
-                mimetype='text/csv',
-                headers={'Content-Disposition': f'attachment; filename={filename}'}
-            )
-
-    except Exception as e:
-        logger.error(f"Error exporting audit logs: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-@app.route('/system-health')
+@app.route("/api-management")
 @login_required
-def system_health():
-    """System health dashboard showing CPU, memory, disk, and network metrics."""
-    try:
-        metrics = get_all_system_metrics()
-
-        # Check if any of the metrics have errors
-        has_errors = False
-        error_messages = []
-
-        for key, value in metrics.items():
-            if isinstance(value, dict) and 'error' in value:
-                has_errors = True
-                error_messages.append(f"{key}: {value['error']}")
-
-        if has_errors:
-            for message in error_messages:
-                flash(message, 'warning')
-
-        return render_template('system_health.html', metrics=metrics)
-    except Exception as e:
-        logger.error(f"Error in system health dashboard: {str(e)}")
-        flash(f"Error retrieving system metrics: {str(e)}", 'danger')
-        return redirect(url_for('index'))
-
-@app.route('/api/system-health')
-@login_required
-def api_system_health():
-    """API endpoint to get system health metrics as JSON."""
-    try:
-        metrics = get_all_system_metrics()
-        return jsonify(metrics)
-    except Exception as e:
-        logger.error(f"Error in system health API: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api-management')
-@login_required
-@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="api_management", action="view_api_management")
+@admin_required
 def api_management():
-    """API management interface."""
-    return render_template('api_management.html')
+    return render_template("api_management.html")
 
-@app.route('/api/admin/keys')
-@login_required
-def admin_api_keys():
-    """Admin endpoint to manage API keys (web interface)."""
-    try:
-        keys = api_key_manager.get_api_keys()
-        return jsonify({
-            'status': 'success',
-            'data': {
-                'keys': keys,
-                'count': len(keys)
-            }
-        })
-    except Exception as e:
-        logger.error(f"Error getting API keys: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
 
-@app.route('/api/admin/keys', methods=['POST'])
-@login_required
-def admin_create_api_key():
-    """Admin endpoint to create API keys (web interface)."""
-    try:
-        data = request.get_json()
-
-        if not data or 'name' not in data:
-            return jsonify({
-                'status': 'error',
-                'message': 'Name is required'
-            }), 400
-
-        key_info = api_key_manager.generate_api_key(
-            name=data['name'],
-            description=data.get('description', ''),
-            permissions=data.get('permissions', ['read']),
-            created_by=current_user.username,
-            expires_days=data.get('expires_days')
-        )
-
-        # Audit the API key creation
-        audit_logger.log_event(
-            event_type=AuditEventType.API_ACCESS,
-            severity=AuditSeverity.HIGH,
-            user_id=str(current_user.id),
-            username=current_user.username,
-            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
-            user_agent=request.headers.get('User-Agent', ''),
-            resource='api_key_management',
-            action='create_api_key',
-            details={
-                'key_name': data['name'],
-                'permissions': data.get('permissions', ['read'])
-            },
-            success=True
-        )
-
-        return jsonify({
-            'status': 'success',
-            'data': key_info
-        }), 201
-
-    except Exception as e:
-        logger.error(f"Error creating API key: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-@app.route('/api/admin/keys/<key_id>', methods=['DELETE'])
-@login_required
-def admin_revoke_api_key(key_id):
-    """Admin endpoint to revoke API keys (web interface)."""
-    try:
-        success = api_key_manager.revoke_api_key(key_id)
-
-        # Audit the API key revocation
-        audit_logger.log_event(
-            event_type=AuditEventType.API_ACCESS,
-            severity=AuditSeverity.HIGH,
-            user_id=str(current_user.id),
-            username=current_user.username,
-            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
-            user_agent=request.headers.get('User-Agent', ''),
-            resource='api_key_management',
-            action='revoke_api_key',
-            details={
-                'key_id': key_id
-            },
-            success=success
-        )
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'API key {key_id} has been revoked'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'API key {key_id} not found'
-            }), 404
-
-    except Exception as e:
-        logger.error(f"Error revoking API key: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-@app.route('/export')
+@app.route("/export")
 @login_required
 @audit_action(AuditEventType.DATA_EXPORT, AuditSeverity.MEDIUM, resource="system_data", action="export_port_data")
 def export_data():
-    """Export port and process data as JSON."""
-    ports = get_open_ports()
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    snapshot = _get_ports_snapshot()
+    return jsonify({"timestamp": datetime.utcnow().isoformat(), "ports": snapshot["ports"]})
 
-    # In a real application, you would save this file and provide a download link
-    # For simplicity, we'll just return the JSON
-    return jsonify({
-        'timestamp': timestamp,
-        'ports': ports
-    })
 
-@app.route('/process-groups')
+@app.route("/process-groups")
 @login_required
-@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.LOW, resource="process_groups", action="view_process_groups")
 def process_groups():
-    """Process groups management page."""
-    try:
-        groups = process_group_manager.get_groups()
-        predefined = process_group_manager.get_predefined_groups()
-        return render_template('process_groups.html', groups=groups, predefined=predefined)
-    except Exception as e:
-        logger.error(f"Error in process groups route: {str(e)}")
-        flash(f"Error retrieving process groups: {str(e)}", 'danger')
-        return redirect(url_for('index'))
+    return render_template(
+        "process_groups.html",
+        groups=process_group_manager.get_groups(),
+        predefined=process_group_manager.get_predefined_groups(),
+    )
 
-@app.route('/api/process-groups')
+
+@app.route("/security-dashboard")
 @login_required
-def api_process_groups():
-    """API endpoint to get all process groups."""
-    try:
-        groups = process_group_manager.get_groups()
-        return jsonify({'status': 'success', 'data': groups})
-    except Exception as e:
-        logger.error(f"Error in process groups API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups', methods=['POST'])
-@login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_groups", action="create_group")
-def api_create_process_group():
-    """API endpoint to create a new process group."""
-    try:
-        data = request.get_json()
-
-        if not data or 'name' not in data:
-            return jsonify({'status': 'error', 'message': 'Group name is required'}), 400
-
-        group_id = process_group_manager.create_group(
-            name=data['name'],
-            description=data.get('description', ''),
-            color=data.get('color', '#007bff'),
-            created_by=current_user.username
-        )
-
-        # Add rules if provided
-        if 'rules' in data:
-            for rule in data['rules']:
-                process_group_manager.add_rule(group_id, rule['type'], rule['value'])
-
-        return jsonify({
-            'status': 'success',
-            'message': f'Process group "{data["name"]}" created successfully',
-            'group_id': group_id
-        }), 201
-
-    except ValueError as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error creating process group: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups/<int:group_id>/kill', methods=['POST'])
-@login_required
-@audit_action(AuditEventType.PROCESS_KILL, AuditSeverity.HIGH, resource="process_groups", action="kill_group_processes")
-def api_kill_group_processes(group_id):
-    """API endpoint to kill all processes in a group."""
-    try:
-        result = process_group_manager.kill_group_processes(group_id, current_user.username)
-
-        # Audit the group kill operation
-        audit_logger.log_event(
-            event_type=AuditEventType.PROCESS_KILL,
-            severity=AuditSeverity.HIGH,
-            user_id=str(current_user.id),
-            username=current_user.username,
-            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr),
-            user_agent=request.headers.get('User-Agent', ''),
-            resource='process_group',
-            action='kill_group_processes',
-            details={
-                'group_id': group_id,
-                'total_processes': result['total'],
-                'successful_kills': result['successful'],
-                'failed_kills': result['failed']
-            },
-            success=result['failed'] == 0
-        )
-
-        return jsonify({
-            'status': 'success',
-            'message': f"Group operation completed: {result['successful']} processes killed, {result['failed']} failed",
-            'data': result
-        })
-
-    except Exception as e:
-        logger.error(f"Error killing group processes: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups/<int:group_id>', methods=['DELETE'])
-@login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_groups", action="delete_group")
-def api_delete_process_group(group_id):
-    """API endpoint to delete a process group."""
-    try:
-        success = process_group_manager.delete_group(group_id)
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Process group {group_id} deleted successfully'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to delete process group {group_id}'
-            }), 500
-
-    except Exception as e:
-        logger.error(f"Error deleting process group: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups/<int:group_id>/processes/<int:pid>', methods=['POST'])
-@login_required
-def api_add_process_to_group(group_id, pid):
-    """API endpoint to manually add a process to a group."""
-    try:
-        success = process_group_manager.add_manual_process(group_id, pid, current_user.username)
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Process {pid} added to group {group_id}'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to add process {pid} to group {group_id}'
-            }), 500
-
-    except Exception as e:
-        logger.error(f"Error adding process to group: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups/<int:group_id>/processes/<int:pid>', methods=['DELETE'])
-@login_required
-def api_remove_process_from_group(group_id, pid):
-    """API endpoint to remove a manually added process from a group."""
-    try:
-        success = process_group_manager.remove_manual_process(group_id, pid)
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Process {pid} removed from group {group_id}'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to remove process {pid} from group {group_id}'
-            }), 500
-
-    except Exception as e:
-        logger.error(f"Error removing process from group: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process-groups/predefined', methods=['POST'])
-@login_required
-def api_create_predefined_group():
-    """API endpoint to create a predefined process group."""
-    try:
-        data = request.get_json()
-
-        if not data or 'name' not in data:
-            return jsonify({'status': 'error', 'message': 'Predefined group name is required'}), 400
-
-        predefined_groups = process_group_manager.get_predefined_groups()
-        selected_group = next((g for g in predefined_groups if g['name'] == data['name']), None)
-
-        if not selected_group:
-            return jsonify({'status': 'error', 'message': 'Predefined group not found'}), 404
-
-        group_id = process_group_manager.create_predefined_group(selected_group, current_user.username)
-
-        return jsonify({
-            'status': 'success',
-            'message': f'Predefined group "{selected_group["name"]}" created successfully',
-            'group_id': group_id
-        }), 201
-
-    except ValueError as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error creating predefined group: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/security-dashboard')
-@login_required
-@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="security", action="view_security_dashboard")
 def security_dashboard():
-    """Security monitoring dashboard."""
-    try:
-        threats = security_monitor.get_recent_threats(hours=24, limit=50)
-        stats = security_monitor.get_threat_statistics()
-        return render_template('security_dashboard.html', threats=threats, stats=stats)
-    except Exception as e:
-        logger.error(f"Error in security dashboard route: {str(e)}")
-        flash(f"Error retrieving security data: {str(e)}", 'danger')
-        return redirect(url_for('index'))
+    return render_template(
+        "security_dashboard.html",
+        threats=security_monitor.get_recent_threats(hours=24, limit=50),
+        stats=security_monitor.get_threat_statistics(),
+        monitoring_active=security_monitor.monitoring,
+    )
 
-@app.route('/api/security/threats')
+
+@app.route("/resource-limits")
 @login_required
-def api_security_threats():
-    """API endpoint to get recent threats."""
-    try:
-        hours = int(request.args.get('hours', 24))
-        limit = int(request.args.get('limit', 100))
-        threats = security_monitor.get_recent_threats(hours=hours, limit=limit)
-        return jsonify({'status': 'success', 'data': threats})
-    except Exception as e:
-        logger.error(f"Error in security threats API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+def resource_limits():
+    return render_template(
+        "resource_limits.html",
+        limits=resource_limiter.get_all_limits(),
+        violations=resource_limiter.get_violations(hours=24, limit=50),
+        templates=resource_limiter.get_templates(),
+    )
 
-@app.route('/api/security/statistics')
+
+@app.route("/managed-services")
 @login_required
-def api_security_statistics():
-    """API endpoint to get security statistics."""
-    try:
-        stats = security_monitor.get_threat_statistics()
-        return jsonify({'status': 'success', 'data': stats})
-    except Exception as e:
-        logger.error(f"Error in security statistics API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+def managed_services_page():
+    services = managed_service_manager.list_services()
+    return render_template(
+        "managed_services.html",
+        services=services,
+        all_services=services,
+        service_summary=_get_service_summary(services),
+    )
 
-@app.route('/api/security/threats/<int:threat_id>/resolve', methods=['POST'])
+
+@app.route("/notifications")
 @login_required
-@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.MEDIUM, resource="security", action="resolve_threat")
-def api_resolve_threat(threat_id):
-    """API endpoint to resolve a threat."""
-    try:
-        success = security_monitor.resolve_threat(threat_id, current_user.username)
+def notifications_page():
+    notification_data = notification_manager.get_notifications(current_user.id, limit=100)
+    return render_template(
+        "notifications.html",
+        notifications=notification_data["items"],
+        unread_count=notification_data["unread_count"],
+        webhooks=notification_manager.list_webhooks() if current_user.role == "admin" else [],
+        rules=notification_manager.get_rules() if current_user.role == "admin" else [],
+        notification_preferences=_notification_preferences_context(),
+    )
 
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Threat {threat_id} marked as resolved'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to resolve threat {threat_id}'
-            }), 404
 
-    except Exception as e:
-        logger.error(f"Error resolving threat: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/security/connections')
+@app.route("/settings/users")
 @login_required
-def api_security_connections():
-    """API endpoint to get recent connection logs."""
-    try:
-        hours = int(request.args.get('hours', 1))
-        limit = int(request.args.get('limit', 1000))
-        connections = security_monitor.get_connection_logs(hours=hours, limit=limit)
-        return jsonify({'status': 'success', 'data': connections})
-    except Exception as e:
-        logger.error(f"Error in security connections API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+@admin_required
+def user_settings_page():
+    return render_template("user_settings.html", users=user_manager.list_users())
 
-@app.route('/api/security/monitoring/start', methods=['POST'])
+
+@app.route("/api/ports")
 @login_required
-@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.HIGH, resource="security", action="start_monitoring")
-def api_start_security_monitoring():
-    """API endpoint to start security monitoring."""
-    try:
-        security_monitor.start_monitoring()
-        return jsonify({
-            'status': 'success',
-            'message': 'Security monitoring started'
-        })
-    except Exception as e:
-        logger.error(f"Error starting security monitoring: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+def api_ports():
+    snapshot = _get_ports_snapshot()
+    return jsonify(snapshot["ports"])
 
-@app.route('/api/security/monitoring/stop', methods=['POST'])
+
+@app.route("/api/process/<int:pid>")
 @login_required
-@audit_action(AuditEventType.SECURITY_VIOLATION, AuditSeverity.HIGH, resource="security", action="stop_monitoring")
-def api_stop_security_monitoring():
-    """API endpoint to stop security monitoring."""
-    try:
-        security_monitor.stop_monitoring()
-        return jsonify({
-            'status': 'success',
-            'message': 'Security monitoring stopped'
-        })
-    except Exception as e:
-        logger.error(f"Error stopping security monitoring: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+def api_process(pid):
+    process_info = get_process_info(pid)
+    if not process_info:
+        return jsonify({"status": "error", "message": "Process not found"}), 404
+    return jsonify(process_info)
 
-@app.route('/process/<int:pid>/details')
-@login_required
-@audit_action(AuditEventType.PROCESS_VIEW, AuditSeverity.LOW, resource="process", action="view_enhanced_details")
-def enhanced_process_details(pid):
-    """Enhanced process details page with historical data."""
-    try:
-        process_info = enhanced_process_manager.get_enhanced_process_info(pid)
-        if not process_info:
-            flash(f"Process with PID {pid} not found", 'error')
-            return redirect(url_for('processes'))
 
-        return render_template('enhanced_process_details.html', process=process_info, pid=pid)
-    except Exception as e:
-        logger.error(f"Error in enhanced process details route: {str(e)}")
-        flash(f"Error retrieving process details: {str(e)}", 'danger')
-        return redirect(url_for('processes'))
-
-@app.route('/api/process/<int:pid>/enhanced')
+@app.route("/api/process/<int:pid>/enhanced")
 @login_required
 def api_enhanced_process_info(pid):
-    """API endpoint to get enhanced process information."""
-    try:
-        process_info = enhanced_process_manager.get_enhanced_process_info(pid)
-        if not process_info:
-            return jsonify({'status': 'error', 'message': 'Process not found'}), 404
+    process_info = enhanced_process_manager.get_enhanced_process_info(pid)
+    if not process_info:
+        return jsonify({"status": "error", "message": "Process not found"}), 404
+    return jsonify({"status": "success", "data": process_info})
 
-        return jsonify({'status': 'success', 'data': process_info})
-    except Exception as e:
-        logger.error(f"Error in enhanced process API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/api/process/<int:pid>/history')
+@app.route("/api/process/<int:pid>/history")
 @login_required
 def api_process_history(pid):
-    """API endpoint to get process historical data."""
-    try:
-        hours = int(request.args.get('hours', 24))
-        history = enhanced_process_manager._get_process_history(pid, hours)
-        return jsonify({'status': 'success', 'data': history})
-    except Exception as e:
-        logger.error(f"Error in process history API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    hours = max(_safe_int(request.args.get("hours"), 24), 1)
+    return jsonify({"status": "success", "data": enhanced_process_manager._get_process_history(pid, hours)})
 
-@app.route('/api/process/<int:pid>/trends')
+
+@app.route("/api/process/<int:pid>/trends")
 @login_required
 def api_process_trends(pid):
-    """API endpoint to get process resource trends."""
-    try:
-        trends = enhanced_process_manager._get_resource_trends(pid)
-        return jsonify({'status': 'success', 'data': trends})
-    except Exception as e:
-        logger.error(f"Error in process trends API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({"status": "success", "data": enhanced_process_manager._get_resource_trends(pid)})
 
-@app.route('/api/process/<int:pid>/events')
+
+@app.route("/api/process/<int:pid>/events")
 @login_required
 def api_process_events(pid):
-    """API endpoint to get process events."""
-    try:
-        limit = int(request.args.get('limit', 50))
-        events = enhanced_process_manager._get_process_events(pid, limit)
-        return jsonify({'status': 'success', 'data': events})
-    except Exception as e:
-        logger.error(f"Error in process events API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    limit = max(_safe_int(request.args.get("limit"), 50), 1)
+    return jsonify({"status": "success", "data": enhanced_process_manager._get_process_events(pid, limit)})
 
-@app.route('/resource-limits')
+
+@app.route("/api/chart-data/<metric_type>")
 @login_required
-@audit_action(AuditEventType.PAGE_ACCESS, AuditSeverity.MEDIUM, resource="resource_limits", action="view_resource_limits")
-def resource_limits():
-    """Resource limits management page."""
-    try:
-        limits = resource_limiter.get_all_limits()
-        violations = resource_limiter.get_violations(hours=24, limit=50)
-        templates = resource_limiter.get_templates()
-        return render_template('resource_limits.html', limits=limits, violations=violations, templates=templates)
-    except Exception as e:
-        logger.error(f"Error in resource limits route: {str(e)}")
-        flash(f"Error retrieving resource limits: {str(e)}", 'danger')
-        return redirect(url_for('index'))
+def api_chart_data(metric_type):
+    hours = max(_safe_int(request.args.get("hours"), 24), 1)
+    metric_mappings = {
+        "cpu": ["overall_percent", "core_0_percent", "core_1_percent"],
+        "memory": ["virtual_percent", "swap_percent"],
+        "load": ["load_1_min", "load_5_min", "load_15_min"],
+        "disk": [],
+        "network": [],
+    }
 
-@app.route('/api/resource-limits', methods=['GET'])
+    if metric_type == "disk":
+        recent_metrics = metrics_storage.get_metrics(metric_type="disk", limit=25)
+        metric_mappings["disk"] = [metric["metric_name"] for metric in recent_metrics if metric["metric_name"].endswith("_percent")][:5]
+    elif metric_type == "network":
+        recent_metrics = metrics_storage.get_metrics(metric_type="network", limit=25)
+        names = set()
+        for metric in recent_metrics:
+            name = metric["metric_name"]
+            if name.endswith("_bytes_sent"):
+                interface = name.replace("_bytes_sent", "")
+                names.add(f"{interface}_bytes_sent")
+                names.add(f"{interface}_bytes_recv")
+        metric_mappings["network"] = list(names)[:6]
+
+    metric_names = metric_mappings.get(metric_type, [])
+    if not metric_names:
+        return jsonify({"status": "error", "message": f"No metrics available for {metric_type}"}), 404
+    return jsonify(metrics_storage.get_chart_data(metric_type, metric_names, hours))
+
+
+@app.route("/api/metrics/collect")
+@login_required
+@admin_required
+def api_collect_metrics():
+    metrics_collector.collect_now()
+    return jsonify({"success": True, "message": "Metrics collected"})
+
+
+@app.route("/api/system-health")
+@login_required
+def api_system_health():
+    return jsonify(get_all_system_metrics())
+
+
+@app.route("/api/dashboard/preferences", methods=["GET", "POST"])
+@login_required
+def api_dashboard_preferences():
+    if request.method == "GET":
+        preferences = user_manager.get_dashboard_preferences(current_user.id)
+        return jsonify({"status": "success", "data": preferences})
+
+    data = request.get_json() or {}
+    preferences = user_manager.save_dashboard_preferences(
+        current_user.id,
+        widget_order=data.get("widget_order"),
+        widget_visibility=data.get("widget_visibility"),
+    )
+    if data.get("theme"):
+        user_manager.set_theme(current_user.id, data["theme"])
+    return jsonify({"status": "success", "data": preferences})
+
+
+@app.route("/api/favorites", methods=["GET", "POST", "DELETE"])
+@login_required
+def api_favorites():
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": user_manager.get_favorites(current_user.id)})
+
+    data = request.get_json(silent=True) or {}
+    if request.method == "POST":
+        required = ["resource_key", "resource_type", "label"]
+        missing = [field for field in required if field not in data]
+        if missing:
+            return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
+        favorite = user_manager.add_favorite(
+            current_user.id,
+            resource_key=data["resource_key"],
+            resource_type=data["resource_type"],
+            label=data["label"],
+            metadata=data.get("metadata"),
+        )
+        return jsonify({"status": "success", "data": favorite}), 201
+
+    resource_key = data.get("resource_key") or request.args.get("resource_key")
+    if not resource_key:
+        return jsonify({"status": "error", "message": "resource_key is required"}), 400
+    removed = user_manager.remove_favorite(current_user.id, resource_key)
+    if not removed:
+        return jsonify({"status": "error", "message": "Favorite not found"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/notifications")
+@login_required
+def api_notifications():
+    limit = max(_safe_int(request.args.get("limit"), 25), 1)
+    unread_only = request.args.get("unread_only") == "true"
+    return jsonify({"status": "success", "data": notification_manager.get_notifications(current_user.id, limit=limit, unread_only=unread_only)})
+
+
+@app.route("/api/notifications/<int:notification_id>/read", methods=["POST"])
+@login_required
+def api_mark_notification_read(notification_id):
+    notification_manager.mark_read(current_user.id, notification_id)
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/notifications/read-all", methods=["POST"])
+@login_required
+def api_mark_all_notifications_read():
+    notification_manager.mark_all_read(current_user.id)
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/notifications/preferences", methods=["POST"])
+@login_required
+def api_notification_preferences():
+    data = request.get_json() or {}
+    severity = data.get("notification_min_severity", current_user.notification_min_severity)
+    if severity not in SEVERITY_ORDER:
+        return jsonify({"status": "error", "message": "Invalid severity"}), 400
+    user_manager.set_notification_preferences(
+        current_user.id,
+        email_notifications=bool(data.get("email_notifications")),
+        notification_min_severity=severity,
+        email=data.get("email", current_user.email),
+    )
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/save-theme", methods=["POST"])
+@login_required
+def save_theme():
+    data = request.get_json() or {}
+    theme = data.get("theme", "system")
+    user_manager.set_theme(current_user.id, theme)
+    return jsonify({"success": True, "theme": theme})
+
+
+@app.route("/api/webhooks", methods=["GET", "POST"])
+@login_required
+@admin_required
+def api_webhooks():
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": notification_manager.list_webhooks()})
+
+    data = request.get_json() or {}
+    required = ["name", "url"]
+    missing = [field for field in required if field not in data or not data[field]]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
+    webhook_id = notification_manager.create_webhook(
+        name=data["name"],
+        url=data["url"],
+        secret=data.get("secret", ""),
+        min_severity=data.get("min_severity", "high"),
+        created_by=current_user.username,
+    )
+    return jsonify({"status": "success", "data": {"id": webhook_id}}), 201
+
+
+@app.route("/api/webhooks/<int:webhook_id>", methods=["DELETE"])
+@login_required
+@admin_required
+def api_delete_webhook(webhook_id):
+    if not notification_manager.delete_webhook(webhook_id):
+        return jsonify({"status": "error", "message": "Webhook not found"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/notification-rules", methods=["GET", "POST"])
+@login_required
+@admin_required
+def api_notification_rules():
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": notification_manager.get_rules()})
+
+    data = request.get_json() or {}
+    required = ["event_type", "email_enabled", "webhook_enabled", "min_severity"]
+    missing = [field for field in required if field not in data]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
+    notification_manager.upsert_rule(
+        event_type=data["event_type"],
+        email_enabled=bool(data["email_enabled"]),
+        webhook_enabled=bool(data["webhook_enabled"]),
+        min_severity=data["min_severity"],
+    )
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/users", methods=["GET", "POST"])
+@login_required
+@admin_required
+def api_users():
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": user_manager.list_users()})
+
+    data = request.get_json() or {}
+    required = ["username", "password", "role"]
+    missing = [field for field in required if not data.get(field)]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
+    try:
+        user_id = user_manager.create_user(
+            username=data["username"],
+            password=data["password"],
+            role=data["role"],
+            email=data.get("email"),
+            email_notifications=bool(data.get("email_notifications")),
+            notification_min_severity=data.get("notification_min_severity", "high"),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    _update_audit_for_user_change("create_user", {"user_id": user_id, "username": data["username"], "role": data["role"]})
+    return jsonify({"status": "success", "data": {"id": user_id}}), 201
+
+
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+@login_required
+@admin_required
+def api_update_user(user_id):
+    data = request.get_json() or {}
+    admin_count = sum(1 for user in user_manager.list_users() if user["role"] == "admin" and user["is_active"])
+    target_user = user_manager.get_user_by_id(user_id)
+    if not target_user:
+        return jsonify({"status": "error", "message": "User not found"}), 404
+    new_role = data.get("role", target_user.role)
+    new_active = bool(data.get("is_active", target_user.is_active))
+    if target_user.role == "admin" and admin_count == 1 and (new_role != "admin" or not new_active):
+        return jsonify({"status": "error", "message": "At least one active admin is required"}), 400
+
+    try:
+        updated = user_manager.update_user(
+            user_id,
+            username=data.get("username"),
+            password=data.get("password"),
+            role=new_role,
+            email=data.get("email"),
+            is_active=new_active,
+            email_notifications=data.get("email_notifications"),
+            notification_min_severity=data.get("notification_min_severity"),
+            theme=data.get("theme"),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    _update_audit_for_user_change("update_user", {"user_id": user_id, "role": new_role, "is_active": new_active})
+    return jsonify({"status": "success", "updated": updated})
+
+
+@app.route("/api/audit-logs")
+@login_required
+def api_audit_logs():
+    event_type = request.args.get("event_type")
+    severity = request.args.get("severity")
+    user_id = request.args.get("user_id")
+    limit = max(_safe_int(request.args.get("limit"), 100), 1)
+    offset = max(_safe_int(request.args.get("offset"), 0), 0)
+    event_enum = AuditEventType(event_type) if event_type in {item.value for item in AuditEventType} else None
+    severity_enum = AuditSeverity(severity) if severity in {item.value for item in AuditSeverity} else None
+    logs = audit_logger.get_logs(limit=limit, offset=offset, event_type=event_enum, severity=severity_enum, user_id=user_id)
+    return jsonify(logs)
+
+
+@app.route("/api/admin/keys")
+@login_required
+@admin_required
+def admin_api_keys():
+    keys = api_key_manager.get_api_keys()
+    return jsonify({"status": "success", "data": {"keys": keys, "count": len(keys)}})
+
+
+@app.route("/api/admin/keys", methods=["POST"])
+@login_required
+@admin_required
+def admin_create_api_key():
+    data = request.get_json() or {}
+    if "name" not in data:
+        return jsonify({"status": "error", "message": "Name is required"}), 400
+    key_info = api_key_manager.generate_api_key(
+        name=data["name"],
+        description=data.get("description", ""),
+        permissions=data.get("permissions", ["read"]),
+        created_by=current_user.username,
+        expires_days=data.get("expires_days"),
+    )
+    return jsonify({"status": "success", "data": key_info}), 201
+
+
+@app.route("/api/admin/keys/<key_id>", methods=["DELETE"])
+@login_required
+@admin_required
+def admin_revoke_api_key(key_id):
+    success = api_key_manager.revoke_api_key(key_id)
+    if not success:
+        return jsonify({"status": "error", "message": f"API key {key_id} not found"}), 404
+    return jsonify({"status": "success", "message": f"API key {key_id} revoked"})
+
+
+@app.route("/api/process-groups")
+@login_required
+def api_process_groups():
+    return jsonify({"status": "success", "data": process_group_manager.get_groups()})
+
+
+@app.route("/api/process-groups", methods=["POST"])
+@login_required
+@admin_required
+def api_create_process_group():
+    data = request.get_json() or {}
+    if "name" not in data:
+        return jsonify({"status": "error", "message": "Group name is required"}), 400
+    try:
+        group_id = process_group_manager.create_group(
+            name=data["name"],
+            description=data.get("description", ""),
+            color=data.get("color", "#0f8d8d"),
+            created_by=current_user.username,
+        )
+        for rule in data.get("rules", []):
+            process_group_manager.add_rule(group_id, rule["type"], rule["value"])
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "group_id": group_id}), 201
+
+
+@app.route("/api/process-groups/<int:group_id>/kill", methods=["POST"])
+@login_required
+@admin_required
+def api_kill_group_processes(group_id):
+    result = process_group_manager.kill_group_processes(group_id, current_user.username)
+    return jsonify({"status": "success", "data": result})
+
+
+@app.route("/api/process-groups/<int:group_id>", methods=["DELETE"])
+@login_required
+@admin_required
+def api_delete_process_group(group_id):
+    if not process_group_manager.delete_group(group_id):
+        return jsonify({"status": "error", "message": "Failed to delete group"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/process-groups/<int:group_id>/processes/<int:pid>", methods=["POST"])
+@login_required
+@admin_required
+def api_add_process_to_group(group_id, pid):
+    process_group_manager.add_manual_process(group_id, pid, current_user.username)
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/process-groups/<int:group_id>/processes/<int:pid>", methods=["DELETE"])
+@login_required
+@admin_required
+def api_remove_process_from_group(group_id, pid):
+    if not process_group_manager.remove_manual_process(group_id, pid):
+        return jsonify({"status": "error", "message": "Failed to remove process"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/process-groups/predefined", methods=["POST"])
+@login_required
+@admin_required
+def api_create_predefined_group():
+    data = request.get_json() or {}
+    if "name" not in data:
+        return jsonify({"status": "error", "message": "Predefined group name is required"}), 400
+    predefined = next((item for item in process_group_manager.get_predefined_groups() if item["name"] == data["name"]), None)
+    if not predefined:
+        return jsonify({"status": "error", "message": "Predefined group not found"}), 404
+    group_id = process_group_manager.create_predefined_group(predefined, current_user.username)
+    return jsonify({"status": "success", "group_id": group_id}), 201
+
+
+@app.route("/api/security/threats")
+@login_required
+def api_security_threats():
+    hours = max(_safe_int(request.args.get("hours"), 24), 1)
+    limit = max(_safe_int(request.args.get("limit"), 100), 1)
+    return jsonify({"status": "success", "data": security_monitor.get_recent_threats(hours=hours, limit=limit)})
+
+
+@app.route("/api/security/statistics")
+@login_required
+def api_security_statistics():
+    return jsonify({"status": "success", "data": security_monitor.get_threat_statistics()})
+
+
+@app.route("/api/security/threats/<int:threat_id>/resolve", methods=["POST"])
+@login_required
+@admin_required
+def api_resolve_threat(threat_id):
+    if not security_monitor.resolve_threat(threat_id, current_user.username):
+        return jsonify({"status": "error", "message": "Threat not found"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/security/connections")
+@login_required
+def api_security_connections():
+    hours = max(_safe_int(request.args.get("hours"), 1), 1)
+    limit = max(_safe_int(request.args.get("limit"), 1000), 1)
+    return jsonify({"status": "success", "data": security_monitor.get_connection_logs(hours=hours, limit=limit)})
+
+
+@app.route("/api/security/monitoring/start", methods=["POST"])
+@login_required
+@admin_required
+def api_start_security_monitoring():
+    security_monitor.start_monitoring()
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/security/monitoring/stop", methods=["POST"])
+@login_required
+@admin_required
+def api_stop_security_monitoring():
+    security_monitor.stop_monitoring()
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/resource-limits", methods=["GET"])
 @login_required
 def api_get_resource_limits():
-    """API endpoint to get all resource limits."""
-    try:
-        limits = resource_limiter.get_all_limits()
-        return jsonify({'status': 'success', 'data': limits})
-    except Exception as e:
-        logger.error(f"Error in resource limits API: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({"status": "success", "data": resource_limiter.get_all_limits()})
 
-@app.route('/api/resource-limits', methods=['POST'])
+
+@app.route("/api/resource-limits", methods=["POST"])
 @login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.HIGH, resource="resource_limits", action="set_resource_limit")
+@admin_required
 def api_set_resource_limit():
-    """API endpoint to set a resource limit."""
+    data = request.get_json() or {}
+    required = ["pid", "limit_type", "limit_value", "action"]
+    missing = [field for field in required if field not in data]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
     try:
-        data = request.get_json()
-
-        required_fields = ['pid', 'limit_type', 'limit_value', 'action']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'status': 'error', 'message': f'Missing required field: {field}'}), 400
-
         limit_id = resource_limiter.set_resource_limit(
-            pid=int(data['pid']),
-            limit_type=data['limit_type'],
-            limit_value=float(data['limit_value']),
-            action=data['action'],
+            pid=int(data["pid"]),
+            limit_type=data["limit_type"],
+            limit_value=float(data["limit_value"]),
+            action=data["action"],
             created_by=current_user.username,
-            description=data.get('description', '')
+            description=data.get("description", ""),
         )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "limit_id": limit_id}), 201
 
-        return jsonify({
-            'status': 'success',
-            'message': f'Resource limit set successfully',
-            'limit_id': limit_id
-        }), 201
 
-    except ValueError as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error setting resource limit: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/resource-limits/<int:limit_id>', methods=['DELETE'])
+@app.route("/api/resource-limits/<int:limit_id>", methods=["DELETE"])
 @login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="resource_limits", action="remove_resource_limit")
+@admin_required
 def api_remove_resource_limit(limit_id):
-    """API endpoint to remove a resource limit."""
-    try:
-        success = resource_limiter.remove_resource_limit(limit_id)
+    if not resource_limiter.remove_resource_limit(limit_id):
+        return jsonify({"status": "error", "message": "Limit not found"}), 404
+    return jsonify({"status": "success"})
 
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Resource limit {limit_id} removed successfully'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to remove resource limit {limit_id}'
-            }), 404
 
-    except Exception as e:
-        logger.error(f"Error removing resource limit: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/process/<int:pid>/priority', methods=['POST'])
+@app.route("/api/process/<int:pid>/priority", methods=["POST"])
 @login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="process_priority", action="set_process_priority")
+@admin_required
 def api_set_process_priority(pid):
-    """API endpoint to set process priority."""
-    try:
-        data = request.get_json()
+    data = request.get_json() or {}
+    if "nice_value" not in data:
+        return jsonify({"status": "error", "message": "Missing nice_value"}), 400
+    nice_value = int(data["nice_value"])
+    if nice_value < -20 or nice_value > 19:
+        return jsonify({"status": "error", "message": "Nice value must be between -20 and 19"}), 400
+    success = resource_limiter.set_process_priority(pid, nice_value, current_user.username)
+    if not success:
+        return jsonify({"status": "error", "message": "Failed to set process priority"}), 500
+    return jsonify({"status": "success"})
 
-        if 'nice_value' not in data:
-            return jsonify({'status': 'error', 'message': 'Missing nice_value'}), 400
 
-        nice_value = int(data['nice_value'])
-        if nice_value < -20 or nice_value > 19:
-            return jsonify({'status': 'error', 'message': 'Nice value must be between -20 and 19'}), 400
-
-        success = resource_limiter.set_process_priority(pid, nice_value, current_user.username)
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Process priority set to {nice_value}'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Failed to set process priority'
-            }), 500
-
-    except ValueError as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error setting process priority: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/resource-limits/templates', methods=['GET'])
+@app.route("/api/resource-limits/templates", methods=["GET"])
 @login_required
 def api_get_templates():
-    """API endpoint to get resource limit templates."""
-    try:
-        templates = resource_limiter.get_templates()
-        return jsonify({'status': 'success', 'data': templates})
-    except Exception as e:
-        logger.error(f"Error getting templates: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+    return jsonify({"status": "success", "data": resource_limiter.get_templates()})
 
-@app.route('/api/resource-limits/templates/<template_name>/apply', methods=['POST'])
+
+@app.route("/api/resource-limits/templates/<template_name>/apply", methods=["POST"])
 @login_required
-@audit_action(AuditEventType.PROCESS_MANAGEMENT, AuditSeverity.MEDIUM, resource="resource_limits", action="apply_template")
+@admin_required
 def api_apply_template(template_name):
-    """API endpoint to apply a resource limit template."""
-    try:
-        data = request.get_json()
+    data = request.get_json() or {}
+    if "pid" not in data:
+        return jsonify({"status": "error", "message": "Missing pid"}), 400
+    success = resource_limiter.apply_template(int(data["pid"]), template_name, current_user.username)
+    if not success:
+        return jsonify({"status": "error", "message": "Failed to apply template"}), 500
+    return jsonify({"status": "success"})
 
-        if 'pid' not in data:
-            return jsonify({'status': 'error', 'message': 'Missing pid'}), 400
 
-        success = resource_limiter.apply_template(
-            pid=int(data['pid']),
-            template_name=template_name,
-            created_by=current_user.username
-        )
-
-        if success:
-            return jsonify({
-                'status': 'success',
-                'message': f'Template "{template_name}" applied successfully'
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': f'Failed to apply template "{template_name}"'
-            }), 500
-
-    except ValueError as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-    except Exception as e:
-        logger.error(f"Error applying template: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/api/resource-limits/violations')
+@app.route("/api/resource-limits/violations")
 @login_required
 def api_get_violations():
-    """API endpoint to get resource limit violations."""
+    hours = max(_safe_int(request.args.get("hours"), 24), 1)
+    limit = max(_safe_int(request.args.get("limit"), 100), 1)
+    return jsonify({"status": "success", "data": resource_limiter.get_violations(hours=hours, limit=limit)})
+
+
+@app.route("/api/managed-services", methods=["GET", "POST"])
+@login_required
+def api_managed_services():
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": managed_service_manager.list_services()})
+
+    if current_user.role != "admin":
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
+
+    data = request.get_json() or {}
+    required = ["name", "command"]
+    missing = [field for field in required if not data.get(field)]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
     try:
-        hours = int(request.args.get('hours', 24))
-        limit = int(request.args.get('limit', 100))
-        violations = resource_limiter.get_violations(hours=hours, limit=limit)
-        return jsonify({'status': 'success', 'data': violations})
-    except Exception as e:
-        logger.error(f"Error getting violations: {str(e)}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        service_id = managed_service_manager.create_service(
+            name=data["name"],
+            command=data["command"],
+            working_directory=data.get("working_directory", ""),
+            environment=data.get("environment", {}),
+            enabled=bool(data.get("enabled", True)),
+            restart_policy=data.get("restart_policy", "on-failure"),
+            restart_limit=int(data.get("restart_limit", 3)),
+            dependency_ids=data.get("dependency_ids", []),
+            created_by=current_user.username,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "data": {"id": service_id}}), 201
 
-if __name__ == '__main__':
-    # Start the metrics collector
-    metrics_collector.start()
 
-    # Start the security monitor
-    security_monitor.start_monitoring()
+@app.route("/api/managed-services/<int:service_id>", methods=["GET", "PUT", "DELETE"])
+@login_required
+def api_managed_service_detail(service_id):
+    if request.method == "GET":
+        service = managed_service_manager.get_service(service_id)
+        if not service:
+            return jsonify({"status": "error", "message": "Service not found"}), 404
+        return jsonify({"status": "success", "data": service})
 
-    # Start the enhanced process manager
-    enhanced_process_manager.start_monitoring()
+    if current_user.role != "admin":
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
 
-    # Start the resource limiter
-    resource_limiter.start_monitoring()
+    if request.method == "DELETE":
+        if not managed_service_manager.delete_service(service_id):
+            return jsonify({"status": "error", "message": "Service not found"}), 404
+        return jsonify({"status": "success"})
 
+    data = request.get_json() or {}
+    existing_service = managed_service_manager.get_service(service_id)
+    if not existing_service:
+        return jsonify({"status": "error", "message": "Service not found"}), 404
     try:
-        app.run(debug=True, host='0.0.0.0', port=5001)
-    finally:
-        # Stop the metrics collector when the app shuts down
+        updated = managed_service_manager.update_service(
+            service_id,
+            name=data.get("name", existing_service["name"]),
+            command=data.get("command", existing_service["command"]),
+            working_directory=data.get("working_directory", existing_service.get("working_directory") or ""),
+            environment=data.get("environment", existing_service.get("environment") or {}),
+            enabled=bool(data.get("enabled", existing_service.get("enabled", True))),
+            restart_policy=data.get("restart_policy", existing_service.get("restart_policy", "on-failure")),
+            restart_limit=int(data.get("restart_limit", existing_service.get("restart_limit", 3))),
+            dependency_ids=data.get("dependency_ids", [dependency["id"] for dependency in existing_service.get("dependencies", [])]),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    if not updated:
+        return jsonify({"status": "error", "message": "Service not found"}), 404
+    return jsonify({"status": "success"})
+
+
+@app.route("/api/managed-services/<int:service_id>/start", methods=["POST"])
+@login_required
+@admin_required
+def api_start_service(service_id):
+    try:
+        result = managed_service_manager.start_service(service_id, requested_by=current_user.username)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "data": result})
+
+
+@app.route("/api/managed-services/<int:service_id>/stop", methods=["POST"])
+@login_required
+@admin_required
+def api_stop_service(service_id):
+    try:
+        result = managed_service_manager.stop_service(service_id, requested_by=current_user.username)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "data": result})
+
+
+@app.route("/api/managed-services/<int:service_id>/restart", methods=["POST"])
+@login_required
+@admin_required
+def api_restart_service(service_id):
+    try:
+        result = managed_service_manager.restart_service(service_id, requested_by=current_user.username)
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "data": result})
+
+
+@app.route("/api/managed-services/<int:service_id>/schedules", methods=["GET", "POST"])
+@login_required
+def api_managed_service_schedules(service_id):
+    if request.method == "GET":
+        return jsonify({"status": "success", "data": managed_service_manager.get_schedules(service_id)})
+
+    if current_user.role != "admin":
+        return jsonify({"status": "error", "message": "Forbidden"}), 403
+
+    data = request.get_json() or {}
+    required = ["action", "trigger_type", "trigger_config"]
+    missing = [field for field in required if field not in data]
+    if missing:
+        return jsonify({"status": "error", "message": f"Missing fields: {', '.join(missing)}"}), 400
+    try:
+        schedule_id = managed_service_manager.add_schedule(
+            service_id=service_id,
+            action=data["action"],
+            trigger_type=data["trigger_type"],
+            trigger_config=data["trigger_config"],
+            created_by=current_user.username,
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 400
+    return jsonify({"status": "success", "data": {"id": schedule_id}}), 201
+
+
+@app.route("/api/managed-services/<int:service_id>/schedules/<int:schedule_id>", methods=["DELETE"])
+@login_required
+@admin_required
+def api_delete_service_schedule(service_id, schedule_id):
+    if not managed_service_manager.remove_schedule(schedule_id):
+        return jsonify({"status": "error", "message": "Schedule not found"}), 404
+    return jsonify({"status": "success"})
+
+
+def start_background_services():
+    if not metrics_collector.running:
+        metrics_collector.start()
+    if not security_monitor.monitoring:
+        security_monitor.start_monitoring()
+    if not enhanced_process_manager.monitoring:
+        enhanced_process_manager.start_monitoring()
+    if not resource_limiter.monitoring:
+        resource_limiter.start_monitoring()
+    if not managed_service_manager.running:
+        managed_service_manager.start()
+    if not notification_manager.running:
+        notification_manager.start(port_provider=get_open_ports)
+
+
+def stop_background_services():
+    if metrics_collector.running:
         metrics_collector.stop()
-
-        # Stop the security monitor when the app shuts down
+    if security_monitor.monitoring:
         security_monitor.stop_monitoring()
-
-        # Stop the enhanced process manager when the app shuts down
+    if enhanced_process_manager.monitoring:
         enhanced_process_manager.stop_monitoring()
-
-        # Stop the resource limiter when the app shuts down
+    if resource_limiter.monitoring:
         resource_limiter.stop_monitoring()
+    if managed_service_manager.running:
+        managed_service_manager.stop()
+    if notification_manager.running:
+        notification_manager.stop()
+
+
+if __name__ == "__main__":
+    start_background_services()
+    try:
+        app.run(debug=True, host="0.0.0.0", port=5001)
+    finally:
+        stop_background_services()

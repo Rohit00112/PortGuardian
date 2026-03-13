@@ -1,46 +1,61 @@
 {% extends 'base.html' %}
 
-{% block title %}Login - PortGuardian{% endblock %}
+{% block title %}Sign In - TrustScan{% endblock %}
 
-{% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white">
-                <h4 class="mb-0"><i class="fas fa-lock me-2"></i>Login</h4>
-            </div>
-            <div class="card-body">
-                <form method="post" action="{{ url_for('login') }}">
-                    <div class="mb-3">
-                        <label for="username" class="form-label">Username</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="fas fa-user"></i></span>
-                            <input type="text" class="form-control" id="username" name="username" required>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="password" class="form-label">Password</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="fas fa-key"></i></span>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                    </div>
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-sign-in-alt me-2"></i>Login
-                        </button>
-                    </div>
-                </form>
-            </div>
-            <div class="card-footer text-muted">
-                <div class="alert alert-info mb-0">
-                    <small>
-                        <i class="fas fa-info-circle me-1"></i>
-                        For demo purposes, use username: <strong>admin</strong> and password: <strong>admin</strong>
-                    </small>
+{% block auth_content %}
+<div class="auth-frame">
+    <section class="auth-hero">
+        <div>
+            <div class="brand-lockup">
+                <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
+                <div>
+                    <div class="brand-eyebrow">Operations Console</div>
+                    <div class="brand-name">TrustScan</div>
                 </div>
             </div>
+            <h1>Run your host like an operations desk, not a toy dashboard.</h1>
+            <p>TrustScan brings ports, services, security signals, resource controls, and audit activity into one focused control surface.</p>
         </div>
-    </div>
+
+        <div class="hero-list">
+            <div class="hero-list-item">
+                <strong>Managed services</strong>
+                <div>Schedule, supervise, and restart services that TrustScan owns.</div>
+            </div>
+            <div class="hero-list-item">
+                <strong>Security visibility</strong>
+                <div>Track threat detections, port changes, and resource-limit violations in one inbox.</div>
+            </div>
+            <div class="hero-list-item">
+                <strong>Operational discipline</strong>
+                <div>Audit access, enforce roles, and keep actions tied to a real local account.</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="auth-panel">
+        <div class="auth-card">
+            <div class="panel-kicker">Authentication</div>
+            <h2>Sign in</h2>
+            <p>Use a local TrustScan account to access the console.</p>
+
+            <form method="post" action="{{ url_for('login') }}" class="page-grid">
+                <div>
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" autocomplete="username" required>
+                </div>
+
+                <div>
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" required>
+                </div>
+
+                <button class="btn-shell" type="submit">
+                    <i class="fas fa-arrow-right-to-bracket"></i>
+                    <span>Enter TrustScan</span>
+                </button>
+            </form>
+        </div>
+    </section>
 </div>
 {% endblock %}

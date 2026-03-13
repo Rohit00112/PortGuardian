@@ -1,0 +1,425 @@
+{% extends 'base.html' %}
+
+{% block title %}Managed Services - TrustScan{% endblock %}
+{% block section_label %}Operations{% endblock %}
+{% block page_title %}Managed services{% endblock %}
+
+{% block content %}
+<section class="stats-grid">
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Total services</div>
+        <div class="metric-value">{{ service_summary.total }}</div>
+        <div class="metric-meta">Configured service definitions</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Running</div>
+        <div class="metric-value">{{ service_summary.running }}</div>
+        <div class="metric-meta">Current live processes</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Failed</div>
+        <div class="metric-value">{{ service_summary.failed }}</div>
+        <div class="metric-meta">Needs attention</div>
+    </article>
+    <article class="surface-card metric-tile">
+        <div class="metric-label">Scheduled</div>
+        <div class="metric-value">{{ service_summary.scheduled }}</div>
+        <div class="metric-meta">With time-based actions</div>
+    </article>
+</section>
+
+{% if is_admin %}
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Service definition</div>
+            <h3>Create or update a managed service</h3>
+        </div>
+    </div>
+    <form id="serviceForm" class="form-grid two">
+        <input type="hidden" id="serviceId" name="service_id">
+        <div>
+            <label for="serviceName">Name</label>
+            <input type="text" id="serviceName" name="name" required>
+        </div>
+        <div>
+            <label for="serviceCommand">Command</label>
+            <input type="text" id="serviceCommand" name="command" required placeholder="python -m http.server 9000">
+        </div>
+        <div>
+            <label for="serviceWorkingDirectory">Working directory</label>
+            <input type="text" id="serviceWorkingDirectory" name="working_directory" placeholder="/path/to/service">
+        </div>
+        <div>
+            <label for="serviceRestartPolicy">Restart policy</label>
+            <select id="serviceRestartPolicy" name="restart_policy">
+                <option value="on-failure">on-failure</option>
+                <option value="always">always</option>
+                <option value="never">never</option>
+            </select>
+        </div>
+        <div>
+            <label for="serviceRestartLimit">Restart limit</label>
+            <input type="number" id="serviceRestartLimit" name="restart_limit" value="3" min="0">
+        </div>
+        <div>
+            <label for="serviceEnabled">Enabled</label>
+            <select id="serviceEnabled" name="enabled">
+                <option value="true" selected>true</option>
+                <option value="false">false</option>
+            </select>
+        </div>
+        <div style="grid-column: 1 / -1;">
+            <label for="serviceEnvironment">Environment JSON</label>
+            <textarea id="serviceEnvironment" name="environment" rows="3" placeholder='{"ENVIRONMENT":"prod"}'></textarea>
+        </div>
+        <div style="grid-column: 1 / -1;">
+            <label for="serviceDependencies">Dependencies</label>
+            <select id="serviceDependencies" name="dependency_ids" multiple>
+                {% for service in all_services %}
+                <option value="{{ service.id }}">{{ service.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <button class="btn-shell" type="submit">
+                <i class="fas fa-save"></i>
+                <span>Save service</span>
+            </button>
+        </div>
+    </form>
+</section>
+{% endif %}
+
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Fleet</div>
+            <h3>Managed services</h3>
+        </div>
+    </div>
+    {% if services %}
+    <div class="event-stack">
+        {% for service in services %}
+        <div class="event-row" data-filter-item="{{ service.name }} {{ service.command }} {{ service.status }}">
+            <div class="toolbar-row">
+                <strong>{{ service.name }}</strong>
+                <span class="status-badge status-{{ service.status }}">{{ service.status }}</span>
+                <span class="filter-chip">{{ service.restart_policy }}</span>
+            </div>
+            <div class="muted mono">{{ service.command }}</div>
+            <div class="muted">
+                PID {{ service.current_pid or 'N/A' }} · Restart count {{ service.restart_count }} ·
+                {{ service.dependencies|length }} dependencies
+            </div>
+            {% if service.dependencies %}
+            <div class="filter-chip-group">
+                {% for dependency in service.dependencies %}
+                <span class="filter-chip">{{ dependency.name }} ({{ dependency.status }})</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if service.schedules %}
+            <div class="event-stack">
+                {% for schedule in service.schedules %}
+                <div class="panel-row">
+                    <strong>{{ schedule.action }}</strong>
+                    <div class="muted">{{ schedule.trigger_type }} · {{ schedule.trigger_config }}</div>
+                    {% if is_admin %}
+                    <div class="action-row">
+                        <button class="btn-shell secondary delete-schedule" type="button" data-service-id="{{ service.id }}" data-schedule-id="{{ schedule.id }}">
+                            <i class="fas fa-trash"></i>
+                            <span>Delete schedule</span>
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if service.events %}
+            <div class="event-stack">
+                {% for event in service.events %}
+                <div class="panel-row">
+                    <div class="toolbar-row">
+                        <span class="severity-badge severity-{{ event.severity }}">{{ event.event_type }}</span>
+                        <span class="context-kicker">{{ event.created_at[:19] }}</span>
+                    </div>
+                    <div class="muted">{{ event.message }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="action-row">
+                {% if is_admin %}
+                <button class="btn-shell secondary edit-service" type="button" data-service='{{ service|tojson|safe }}'>
+                    <i class="fas fa-pen"></i>
+                    <span>Edit</span>
+                </button>
+                <button class="btn-shell" type="button" data-action="start" data-service-id="{{ service.id }}">
+                    <i class="fas fa-play"></i>
+                    <span>Start</span>
+                </button>
+                <button class="btn-shell warning" type="button" data-action="restart" data-service-id="{{ service.id }}">
+                    <i class="fas fa-rotate"></i>
+                    <span>Restart</span>
+                </button>
+                <button class="btn-shell danger" type="button" data-action="stop" data-service-id="{{ service.id }}">
+                    <i class="fas fa-stop"></i>
+                    <span>Stop</span>
+                </button>
+                <button class="btn-shell secondary add-schedule" type="button" data-service-id="{{ service.id }}">
+                    <i class="fas fa-clock"></i>
+                    <span>Add schedule</span>
+                </button>
+                <button class="btn-shell danger delete-service" type="button" data-service-id="{{ service.id }}">
+                    <i class="fas fa-trash"></i>
+                    <span>Delete</span>
+                </button>
+                {% endif %}
+                <button class="btn-shell secondary favorite-service" type="button" data-service-id="{{ service.id }}" data-service-name="{{ service.name }}">
+                    <i class="far fa-star"></i>
+                    <span>Favorite</span>
+                </button>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No managed services have been created yet.</div>
+    {% endif %}
+</section>
+
+{% if is_admin %}
+<section class="surface-card hidden" id="scheduleFormCard">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Scheduling</div>
+            <h3>Add a schedule</h3>
+        </div>
+    </div>
+    <form id="scheduleForm" class="form-grid two">
+        <input type="hidden" id="scheduleServiceId" name="service_id">
+        <div>
+            <label for="scheduleAction">Action</label>
+            <select id="scheduleAction" name="action">
+                <option value="start">start</option>
+                <option value="stop">stop</option>
+                <option value="restart">restart</option>
+            </select>
+        </div>
+        <div>
+            <label for="scheduleTriggerType">Trigger type</label>
+            <select id="scheduleTriggerType" name="trigger_type">
+                <option value="interval">interval</option>
+                <option value="cron">cron</option>
+                <option value="once">once</option>
+            </select>
+        </div>
+        <div id="intervalField">
+            <label for="scheduleIntervalSeconds">Interval seconds</label>
+            <input type="number" id="scheduleIntervalSeconds" name="interval_seconds" value="60">
+        </div>
+        <div class="hidden" id="cronField">
+            <label for="scheduleCronExpression">Cron expression</label>
+            <input type="text" id="scheduleCronExpression" name="cron_expression" placeholder="*/5 * * * *">
+        </div>
+        <div class="hidden" id="onceField">
+            <label for="scheduleRunDate">Run date</label>
+            <input type="datetime-local" id="scheduleRunDate" name="run_date">
+        </div>
+        <div>
+            <button class="btn-shell" type="submit">
+                <i class="fas fa-calendar-plus"></i>
+                <span>Save schedule</span>
+            </button>
+        </div>
+    </form>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const serviceForm = document.getElementById("serviceForm");
+    const scheduleFormCard = document.getElementById("scheduleFormCard");
+    const scheduleForm = document.getElementById("scheduleForm");
+    const triggerType = document.getElementById("scheduleTriggerType");
+    const intervalField = document.getElementById("intervalField");
+    const cronField = document.getElementById("cronField");
+    const onceField = document.getElementById("onceField");
+
+    function parseEnvironment(text) {
+        if (!text.trim()) {
+            return {};
+        }
+        return JSON.parse(text);
+    }
+
+    function selectedDependencyIds() {
+        const select = document.getElementById("serviceDependencies");
+        return Array.from(select.selectedOptions).map((option) => Number(option.value));
+    }
+
+    function syncTriggerFields() {
+        if (!triggerType) {
+            return;
+        }
+        const value = triggerType.value;
+        intervalField.classList.toggle("hidden", value !== "interval");
+        cronField.classList.toggle("hidden", value !== "cron");
+        onceField.classList.toggle("hidden", value !== "once");
+    }
+
+    triggerType?.addEventListener("change", syncTriggerFields);
+    syncTriggerFields();
+
+    serviceForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(serviceForm);
+        const serviceId = formData.get("service_id");
+        const payload = {
+            name: formData.get("name"),
+            command: formData.get("command"),
+            working_directory: formData.get("working_directory"),
+            restart_policy: formData.get("restart_policy"),
+            restart_limit: Number(formData.get("restart_limit") || 0),
+            enabled: formData.get("enabled") === "true",
+            environment: parseEnvironment(formData.get("environment") || ""),
+            dependency_ids: selectedDependencyIds(),
+        };
+
+        try {
+            if (serviceId) {
+                await TrustScan.requestJson(`/api/managed-services/${serviceId}`, {
+                    method: "PUT",
+                    body: JSON.stringify(payload),
+                });
+            } else {
+                await TrustScan.requestJson("/api/managed-services", {
+                    method: "POST",
+                    body: JSON.stringify(payload),
+                });
+            }
+            window.location.reload();
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.querySelectorAll(".edit-service").forEach((button) => {
+        button.addEventListener("click", () => {
+            const service = JSON.parse(button.dataset.service);
+            document.getElementById("serviceId").value = service.id;
+            document.getElementById("serviceName").value = service.name;
+            document.getElementById("serviceCommand").value = service.command;
+            document.getElementById("serviceWorkingDirectory").value = service.working_directory || "";
+            document.getElementById("serviceRestartPolicy").value = service.restart_policy;
+            document.getElementById("serviceRestartLimit").value = service.restart_limit;
+            document.getElementById("serviceEnabled").value = String(Boolean(service.enabled));
+            document.getElementById("serviceEnvironment").value = JSON.stringify(service.environment || {}, null, 2);
+            const select = document.getElementById("serviceDependencies");
+            Array.from(select.options).forEach((option) => {
+                option.selected = service.dependencies.some((dependency) => Number(dependency.id) === Number(option.value));
+            });
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+    });
+
+    document.querySelectorAll("[data-action]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const action = button.dataset.action;
+            const serviceId = button.dataset.serviceId;
+            try {
+                await TrustScan.requestJson(`/api/managed-services/${serviceId}/${action}`, { method: "POST" });
+                window.location.reload();
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    document.querySelectorAll(".delete-service").forEach((button) => {
+        button.addEventListener("click", async () => {
+            if (!window.confirm("Delete this managed service definition?")) {
+                return;
+            }
+            try {
+                await TrustScan.requestJson(`/api/managed-services/${button.dataset.serviceId}`, { method: "DELETE" });
+                window.location.reload();
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    document.querySelectorAll(".add-schedule").forEach((button) => {
+        button.addEventListener("click", () => {
+            scheduleFormCard.classList.remove("hidden");
+            document.getElementById("scheduleServiceId").value = button.dataset.serviceId;
+            window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+        });
+    });
+
+    document.querySelectorAll(".delete-schedule").forEach((button) => {
+        button.addEventListener("click", async () => {
+            try {
+                await TrustScan.requestJson(`/api/managed-services/${button.dataset.serviceId}/schedules/${button.dataset.scheduleId}`, {
+                    method: "DELETE",
+                });
+                window.location.reload();
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    scheduleForm?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(scheduleForm);
+        const serviceId = formData.get("service_id");
+        const triggerTypeValue = formData.get("trigger_type");
+        const triggerConfig = {};
+        if (triggerTypeValue === "interval") {
+            triggerConfig.seconds = Number(formData.get("interval_seconds"));
+        } else if (triggerTypeValue === "cron") {
+            triggerConfig.expression = formData.get("cron_expression");
+        } else {
+            triggerConfig.run_date = formData.get("run_date");
+        }
+        try {
+            await TrustScan.requestJson(`/api/managed-services/${serviceId}/schedules`, {
+                method: "POST",
+                body: JSON.stringify({
+                    action: formData.get("action"),
+                    trigger_type: triggerTypeValue,
+                    trigger_config: triggerConfig,
+                }),
+            });
+            window.location.reload();
+        } catch (error) {
+            TrustScan.showFlash(error.message, "danger");
+        }
+    });
+
+    document.querySelectorAll(".favorite-service").forEach((button) => {
+        button.addEventListener("click", async () => {
+            try {
+                await TrustScan.requestJson("/api/favorites", {
+                    method: "POST",
+                    body: JSON.stringify({
+                        resource_key: `service:${button.dataset.serviceId}`,
+                        resource_type: "service",
+                        label: button.dataset.serviceName,
+                    }),
+                });
+                TrustScan.showFlash("Service added to favorites.", "success");
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+
+{% block title %}Ports - TrustScan{% endblock %}
+{% block section_label %}Network{% endblock %}
+{% block page_title %}Listening ports and processes{% endblock %}
+
+{% block content %}
+<section class="surface-card">
+    <div class="section-header">
+        <div>
+            <div class="panel-kicker">Ports</div>
+            <h3>Live port inventory</h3>
+            <p class="mb-0">Review listening sockets, jump to process details, and pin important ports for quick access.</p>
+        </div>
+        <div class="action-row">
+            <button class="btn-shell secondary" id="refreshPorts" type="button">
+                <i class="fas fa-rotate"></i>
+                <span>Refresh</span>
+            </button>
+            <a class="btn-shell secondary" href="{{ url_for('export_data') }}" target="_blank">
+                <i class="fas fa-file-export"></i>
+                <span>Export JSON</span>
+            </a>
+        </div>
+    </div>
+
+    {% if permission_error or not ports %}
+    <div class="empty-state">
+        Detailed port data may require elevated privileges on this host. Try running the app with the permissions needed to inspect system processes and network sockets.
+    </div>
+    {% else %}
+    <div class="table-shell">
+        <table id="portsTable">
+            <thead>
+                <tr>
+                    <th>Favorite</th>
+                    <th>Port</th>
+                    <th>Protocol</th>
+                    <th>Status</th>
+                    <th>PID</th>
+                    <th>Process</th>
+                    <th>Started</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for port in ports %}
+                {% set resource_key = 'port:' ~ port.protocol ~ ':' ~ port.port %}
+                <tr data-filter-item="{{ port.port }} {{ port.protocol }} {{ port.status }} {{ port.pid }} {{ port.process_name }}">
+                    <td>
+                        <button class="icon-button favorite-toggle" type="button"
+                                data-resource-key="{{ resource_key }}"
+                                data-resource-type="port"
+                                data-label="{{ port.protocol }} {{ port.port }}"
+                                title="Toggle favorite">
+                            <i class="fa{% if resource_key in favorite_keys %}s{% else %}r{% endif %} fa-star"></i>
+                        </button>
+                    </td>
+                    <td>{{ port.port }}</td>
+                    <td>{{ port.protocol }}</td>
+                    <td><span class="status-badge status-running">{{ port.status }}</span></td>
+                    <td>{{ port.pid }}</td>
+                    <td>
+                        {% if port.pid != 'N/A' %}
+                        <a href="{{ url_for('enhanced_process_details', pid=port.pid) }}">{{ port.process_name }}</a>
+                        {% else %}
+                        {{ port.process_name }}
+                        {% endif %}
+                    </td>
+                    <td>{{ port.start_time }}</td>
+                    <td>
+                        <div class="action-row">
+                            {% if port.pid != 'N/A' %}
+                            <a class="btn-shell secondary" href="{{ url_for('enhanced_process_details', pid=port.pid) }}">
+                                <i class="fas fa-chart-line"></i>
+                            </a>
+                            <a class="btn-shell secondary" href="{{ url_for('process_detail', pid=port.pid) }}">
+                                <i class="fas fa-circle-info"></i>
+                            </a>
+                            {% if is_admin %}
+                            <button class="btn-shell danger kill-process" type="button"
+                                    data-pid="{{ port.pid }}"
+                                    data-process="{{ port.process_name }}">
+                                <i class="fas fa-ban"></i>
+                            </button>
+                            {% endif %}
+                            {% else %}
+                            <span class="muted">N/A</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("refreshPorts")?.addEventListener("click", () => window.location.reload());
+
+    document.querySelectorAll(".kill-process").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const pid = button.dataset.pid;
+            const processName = button.dataset.process;
+            if (!window.confirm(`Terminate ${processName} (PID ${pid})?`)) {
+                return;
+            }
+            try {
+                const result = await TrustScan.requestJson(`/kill/${pid}`, {
+                    method: "POST",
+                    headers: { "X-Requested-With": "XMLHttpRequest" },
+                });
+                TrustScan.showFlash(result.message, "success");
+                window.setTimeout(() => window.location.reload(), 900);
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+
+    document.querySelectorAll(".favorite-toggle").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const icon = button.querySelector("i");
+            const isActive = icon.classList.contains("fas");
+            try {
+                if (isActive) {
+                    await TrustScan.requestJson("/api/favorites", {
+                        method: "DELETE",
+                        body: JSON.stringify({ resource_key: button.dataset.resourceKey }),
+                    });
+                    icon.classList.remove("fas");
+                    icon.classList.add("far");
+                } else {
+                    await TrustScan.requestJson("/api/favorites", {
+                        method: "POST",
+                        body: JSON.stringify({
+                            resource_key: button.dataset.resourceKey,
+                            resource_type: button.dataset.resourceType,
+                            label: button.dataset.label,
+                            metadata: {},
+                        }),
+                    });
+                    icon.classList.remove("far");
+                    icon.classList.add("fas");
+                }
+            } catch (error) {
+                TrustScan.showFlash(error.message, "danger");
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

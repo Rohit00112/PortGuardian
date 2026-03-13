@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}Initial Setup - TrustScan{% endblock %}
+
+{% block auth_content %}
+<div class="auth-frame">
+    <section class="auth-hero">
+        <div>
+            <div class="brand-lockup">
+                <div class="brand-mark"><i class="fas fa-shield-halved"></i></div>
+                <div>
+                    <div class="brand-eyebrow">Bootstrap</div>
+                    <div class="brand-name">TrustScan</div>
+                </div>
+            </div>
+            <h1>Create the first administrator.</h1>
+            <p>TrustScan no longer ships with a hardcoded demo login. This one-time setup creates the local admin account and closes the bootstrap route afterwards.</p>
+        </div>
+
+        <div class="hero-list">
+            <div class="hero-list-item">
+                <strong>Local users only</strong>
+                <div>Authentication in this phase is local RBAC with admin and viewer roles.</div>
+            </div>
+            <div class="hero-list-item">
+                <strong>Persistent preferences</strong>
+                <div>The first admin can later manage themes, notification settings, and users from inside the app.</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="auth-panel">
+        <div class="auth-card">
+            <div class="panel-kicker">First Run</div>
+            <h2>Initialize TrustScan</h2>
+            <p>Create the initial admin account for this host.</p>
+
+            <form method="post" action="{{ url_for('setup') }}" class="page-grid">
+                <div>
+                    <label for="username">Admin username</label>
+                    <input type="text" id="username" name="username" autocomplete="username" required>
+                </div>
+
+                <div>
+                    <label for="email">Email (optional)</label>
+                    <input type="email" id="email" name="email" autocomplete="email">
+                </div>
+
+                <div>
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" autocomplete="new-password" required>
+                </div>
+
+                <div>
+                    <label for="confirm_password">Confirm password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" required>
+                </div>
+
+                <button class="btn-shell" type="submit">
+                    <i class="fas fa-lock"></i>
+                    <span>Create admin account</span>
+                </button>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}
